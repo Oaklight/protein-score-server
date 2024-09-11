@@ -1,4 +1,6 @@
+import json
 from time import sleep, time
+
 import requests
 import json
 from tqdm import tqdm
@@ -11,6 +13,10 @@ test_data = {
 
 bulk_test = 100
 
+config_file = "./client.json"
+with open(config_file, "r") as f:
+    config = json.load(f)
+
 # 将测试数据转换为JSON
 test_data_json = json.dumps(test_data)
 
@@ -19,7 +25,7 @@ t_run = time()
 # 发送POST请求
 for i in tqdm(range(bulk_test)):
     response = requests.post(
-        "http://140.221.79.21:8000/predict/",
+        f"{config['server']}/predict/",
         data=test_data_json,
         headers={"Content-Type": "application/json"},
     )
@@ -29,7 +35,7 @@ for i in tqdm(range(bulk_test)):
         if response.status_code == 408:
             sleep(10)  # request timeout, wait for 10 seconds
         response = requests.post(
-            "http://140.221.79.21:8000/predict/",
+            f"{config['server']}/predict/",
             data=test_data_json,
             headers={"Content-Type": "application/json"},
         )
@@ -38,7 +44,7 @@ for i in tqdm(range(bulk_test)):
 plddt_scores = {}
 for id in tqdm(job_ids):
     response = requests.get(
-        f"http://140.221.79.21:8000/result/{id}",
+        f"{config['server']}/result/{id}",
         headers={"Content-Type": "application/json"},
     )
     job_ids[id] = response.json()["prediction"]

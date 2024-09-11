@@ -32,6 +32,7 @@ class PredictServer:
 
         login(self.config["api_key"])
         self.load_models()
+        self.esm_num_steps = self.config["model"]["esm_num_steps"]
 
         # initialize task queue, result pool, and result queue
         self.task_queue = queue.Queue(self.config["task_queue_size"])
@@ -99,7 +100,8 @@ class PredictServer:
 
             protein = ESMProtein(sequence=task.data)
             protein = model.generate(
-                protein, GenerationConfig(track="structure", num_steps=8)
+                protein,
+                GenerationConfig(track="structure", num_steps=self.esm_num_steps),
             )
             temp_pdb_path = os.path.join(
                 self.config["intermediate_pdb_path"], f"result_esm3_{task.id}.pdb"
