@@ -161,4 +161,4 @@ cython_debug/
 #.idea/
 
 intermediate_pdbs/
-backbone_pdbs/
+backbone_pdbs/pdb/
