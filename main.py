@@ -26,7 +26,8 @@ logger.addHandler(console_handler)
 
 
 class PredictRequest(BaseModel):
-    data: str
+    seq: str
+    name: str
     type: str
 
 
@@ -57,7 +58,8 @@ async def predict(request: PredictRequest):
         raise HTTPException(status_code=429, detail="Job queue is full")
     task = PredictTask(
         id=uuid4().hex,
-        data=request.data,
+        seq=request.seq,
+        name=request.name,
         type=request.type,
     )
     predict_server.task_queue.put(task)

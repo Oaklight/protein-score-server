@@ -17,9 +17,10 @@ torch.set_warn_always(True)
 
 
 class PredictTask:
-    def __init__(self, id, data, type):
+    def __init__(self, id, seq, name, type):
         self.id = uuid4() if id is None else id
-        self.data = data
+        self.seq = seq
+        self.name = name
         self.type = type
 
 
@@ -95,27 +96,27 @@ class PredictServer:
         t_predict = time()
         output_data = None
 
-        if task.type == "structure":
-            self.logger.debug(f"[{task.id}] Task type is 'structure'")
+        protein, temp_pdb_path = self.predict_structure(task, model)
+        self.logger.debug(f"[{task.id}] Task done, result saved to {temp_pdb_path}")
 
-            protein = ESMProtein(sequence=task.data)
-            protein = model.generate(
-                protein,
-                GenerationConfig(track="structure", num_steps=self.esm_num_steps),
-            )
-            temp_pdb_path = os.path.join(
-                self.config["intermediate_pdb_path"], f"result_esm3_{task.id}.pdb"
-            )
-            protein.to_pdb(temp_pdb_path)
-            self.logger.debug(f"[{task.id}] Task done, result saved to {temp_pdb_path}")
+        match task.type:
 
-            struct = bsio.load_structure(temp_pdb_path, extra_fields=["b_factor"])
-            # this will be the pLDDT, convert to float
-            output_data = struct.b_factor.mean().item()
-            self.logger.debug(f"[{task.id}] pLDDT is {output_data}")
-        else:
-            # not implement
-            raise Exception("Task type not supported")
+            case "plddt":
+                self.logger.debug(f"[{task.id}] Task type is 'plddt'")
+
+                struct = bsio.load_structure(temp_pdb_path, extra_fields=["b_factor"])
+                # this will be the pLDDT, convert to float
+                output_data = struct.b_factor.mean().item()
+                self.logger.debug(f"[{task.id}] pLDDT is {output_data}")
+
+            case "tmscore":
+                self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
+
+                # alignment = tmscoring.TMscoring("structure1.pdb", "structure2.pdb")
+
+            case _:
+                # not implement
+                raise Exception("Task type not supported")
 
         t_predict_done = time() - t_predict
         self.release_model(model)  # put model back to available queue
@@ -135,6 +136,18 @@ class PredictServer:
 
         self.logger.debug(self.result_pool)
         return output_data
+
+    def predict_structure(self, task, model):
+        protein = ESMProtein(sequence=task.seq)
+        protein = model.generate(
+            protein,
+            GenerationConfig(track="structure", num_steps=self.esm_num_steps),
+        )
+        temp_pdb_path = os.path.join(
+            self.config["intermediate_pdb_path"], f"result_esm3_{task.id}.pdb"
+        )
+        protein.to_pdb(temp_pdb_path)
+        return protein, temp_pdb_path
 
     def run(self):
         self.logger.info("Server is running")

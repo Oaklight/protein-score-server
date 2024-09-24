@@ -2,16 +2,16 @@ import json
 from time import sleep, time
 
 import requests
-import json
 from tqdm import tqdm
 
 # 定义测试数据
 test_data = {
-    "data": "MKTVRQERLKSIVRILERSKEPVSGAQLAEELSVSRQVIVQDIAYLRSLGYNIVATPRGYVLAGG",
-    "type": "structure",
+    "seq": "MKTVRQERLKSIVRILERSKEPVSGAQLAEELSVSRQVIVQDIAYLRSLGYNIVATPRGYVLAGG",
+    "name": "random",
+    "type": "plddt",
 }
 
-bulk_test = 100
+bulk_test = 5
 
 config_file = "./client.json"
 with open(config_file, "r") as f:
