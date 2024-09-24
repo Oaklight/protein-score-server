@@ -11,7 +11,7 @@ To install the environment, you need to clone this repository and install the re
 ```bash
 git clone https://github.com/Oaklight/esm3-plddt-server.git
 cd esm3-plddt-server
-conda env create -f env/environment.yml
+conda env create -f env/environment.yaml
 conda activate esm
 pip install -r env/requirements.txt
 ```
