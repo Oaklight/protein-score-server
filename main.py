@@ -4,6 +4,7 @@ import os
 import sys
 from uuid import uuid4
 
+import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from regex import P
@@ -43,6 +44,9 @@ class ResultResponse(BaseModel):
 app = FastAPI(debug=True)
 
 config_path = os.path.join(current_dir, "server.yaml")
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
+
 predict_server = PredictServer(config_path, logger=logger)
 
 
@@ -85,7 +89,7 @@ async def wait_for_result(job_id: str, timeout: float):
 
 
 @app.get("/result/{job_id}", response_model=ResultResponse)
-async def get_result(job_id: str, timeout: float = 10.0):
+async def get_result(job_id: str, timeout: float = config["timeout"]):
     try:
         result = await wait_for_result(job_id, timeout)
         return ResultResponse(job_id=job_id, prediction=result)

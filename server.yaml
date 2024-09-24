@@ -12,3 +12,5 @@ model:
   esm_num_steps: 5
 
 task_queue_size: 50
+
+timeout: 15.0 # seconds
