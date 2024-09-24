@@ -1,3 +1,5 @@
+logging_level: DEBUG
+
 api_key: "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"
 
 history_path: "./history_results.tsv"

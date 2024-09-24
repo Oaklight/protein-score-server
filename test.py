@@ -6,12 +6,12 @@ from tqdm import tqdm
 
 # 定义测试数据
 test_data = {
-    "seq": "MKTVRQERLKSIVRILERSKEPVSGAQLAEELSVSRQVIVQDIAYLRSLGYNIVATPRGYVLAGG",
-    "name": "random",
-    "type": "plddt",
+    "seq": "RTDCYGNVNRIDTTGASCKTAKPEGLSYCGVSASKKIAERDLQAMDRYKTIIKKVGEKLCVEPAVIAGIISRESHAGKVLKNGWGDRGNGFGLMQVDKRSHKPQGTWNGEVHITQGTTILINFIKTIQKKFPSWTKDQQLKGGISAYNAGAGNVRSYARMDIGTTHDDYANDVVARAQYYKQHGY",
+    "name": "153l.A",
+    "type": "tmscore",
 }
 
-bulk_test = 5
+bulk_test = 2
 
 config_file = "./client.json"
 with open(config_file, "r") as f:

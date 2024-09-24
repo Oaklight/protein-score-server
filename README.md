@@ -46,7 +46,7 @@ Users can send `POST` requests to `http://your-host:8000/predict/` to get predic
 
 * `seq`: String, representing the protein sequence.
 * `name`: String, representing the name of the protein.
-* `type`: String, representing the task type, currently only supports "structure".
+* `type`: String, representing the task type, currently supports "plddt", "tmscore".
 
 The server will return a JSON response containing two fields: `job_id` and `prediction` .
 

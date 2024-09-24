@@ -3,6 +3,9 @@ import os
 import queue
 import sys
 import threading
+
+# 忽略FutureWarning和DeprecationWarning
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from time import time
 from uuid import uuid4
@@ -11,15 +14,17 @@ import biotite.structure.io as bsio
 import torch
 import yaml
 from huggingface_hub import login
+from TMscore import TMscore
 
 from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
+
+torch.set_warn_always(False)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 import to_pdb
 
-torch.set_warn_always(True)
 to_pdb.process()
 
 
@@ -104,7 +109,6 @@ class PredictServer:
         output_data = None
 
         protein, temp_pdb_path = self.predict_structure(task, model)
-        self.logger.debug(f"[{task.id}] Task done, result saved to {temp_pdb_path}")
 
         match task.type:
 
@@ -113,19 +117,29 @@ class PredictServer:
 
                 struct = bsio.load_structure(temp_pdb_path, extra_fields=["b_factor"])
                 # this will be the pLDDT, convert to float
-                output_data = struct.b_factor.mean().item()
-                self.logger.debug(f"[{task.id}] pLDDT is {output_data}")
+                plddt = struct.b_factor.mean().item()
+                self.logger.debug(f"[{task.id}] pLDDT is {plddt}")
+
+                output_data = plddt
 
             case "tmscore":
                 self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
+                reference_pdb = to_pdb.get_pdb_file(task.name)
+                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
 
-                # alignment = tmscoring.TMscoring("structure1.pdb", "structure2.pdb")
+                lengths, results = TMscore(reference_pdb, temp_pdb_path)
+                self.logger.debug(f"[{task.id}] Alignment done")
+
+                self.logger.debug(f"[{task.id}] TMscore is {results}")
+
+                output_data = results[0]
 
             case _:
                 # not implement
                 raise Exception("Task type not supported")
 
         t_predict_done = time() - t_predict
+        self.logger.info(f"[{task.id}] Task done in {t_predict_done:.2f} seconds")
         self.release_model(model)  # put model back to available queue
 
         # put future into result pool
@@ -154,6 +168,8 @@ class PredictServer:
             self.config["intermediate_pdb_path"], f"result_esm3_{task.id}.pdb"
         )
         protein.to_pdb(temp_pdb_path)
+
+        self.logger.debug(f"[{task.id}] Task done, result saved to {temp_pdb_path}")
         return protein, temp_pdb_path
 
     def run(self):

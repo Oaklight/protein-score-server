@@ -12,14 +12,19 @@ from regex import P
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
+
 from server import PredictServer, PredictTask
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+
+config_path = os.path.join(current_dir, "server.yaml")
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
+logger.setLevel(config["logging_level"])
 
 # Create a StreamHandler and set its level to INFO
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(config["logging_level"])
 
 # Add the StreamHandler to the logger
 logger.addHandler(console_handler)
@@ -44,9 +49,6 @@ class ResultResponse(BaseModel):
 # app = FastAPI()
 app = FastAPI(debug=True)
 
-config_path = os.path.join(current_dir, "server.yaml")
-with open(config_path, "r") as f:
-    config = yaml.safe_load(f)
 
 predict_server = PredictServer(config_path, logger=logger)
 
@@ -73,7 +75,7 @@ async def check_job_status(job_id: str):
 
     if job_id not in predict_server.result_pool:
         logger.info(f"job_id is {job_id}")
-        logger.info("job_id not in ", predict_server.result_pool)
+        logger.info(f"job_id not in {predict_server.result_pool}")
         raise HTTPException(status_code=404, detail="Job not found")
 
     result = predict_server.result_pool[job_id]
