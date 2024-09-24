@@ -5,6 +5,7 @@ from typing import List, Literal
 
 import numpy as np
 import pandas as pd
+import yaml
 from tqdm import tqdm
 
 tqdm.pandas()
@@ -30,6 +31,7 @@ def reconstruct_backbone_pdb(
     ):
         pass
 
+    print(f"Done writing pdb files to {output_dir}")
     executor.shutdown()
 
 
@@ -66,12 +68,22 @@ def write_pdb(
         f.write(bulk_write)
 
 
-if __name__ == "__main__":
-    base_path = "backbone_pdbs/parquet/protein_backbone_cath_"
+def process():
+    current_path = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_path, "server.yaml")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    base_path = os.path.join(current_path, config["backbone_pdb"]["parquet_prefix"])
+    output_dir = os.path.join(current_path, config["backbone_pdb"]["pdb_prefix"])
     for version in ["4.3", "4.2"]:
         for split in ["validation", "test"]:
             reconstruct_backbone_pdb(
                 parquet_path=f"{base_path}{version}/{split}.parquet",
-                output_dir=f"backbone_pdbs/pdb/protein_backbone_cath_{version}",
+                output_dir=f"{output_dir}{version}",
                 atom_wanted=["CA"],
             )
+
+
+if __name__ == "__main__":
+    process()

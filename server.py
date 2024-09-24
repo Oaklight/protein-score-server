@@ -1,6 +1,7 @@
 import gc
 import os
 import queue
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from time import time
@@ -9,11 +10,17 @@ from uuid import uuid4
 import biotite.structure.io as bsio
 import torch
 import yaml
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 from huggingface_hub import login
 
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+import to_pdb
+
 torch.set_warn_always(True)
+to_pdb.process()
 
 
 class PredictTask:
