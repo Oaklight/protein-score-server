@@ -131,12 +131,13 @@ def process(force=False):
 
     # save reversed index to the same folder of output_dir, rip off the final part from output_dir
     index_path = os.path.join(current_path, config["backbone_pdb"]["reversed_index"])
-    with open(index_path, "r") as f:
-        # update the file with the new reversed index
-        existing_index = yaml.safe_load(f) or {}
-    existing_index.update(reversed_index)
+    if os.path.exists(index_path):
+        with open(index_path, "r") as f:
+            # update the file with the new reversed index
+            existing_index = yaml.safe_load(f) or {}
+        reversed_index.update(existing_index)
     with open(index_path, "w") as f:
-        yaml.dump(existing_index, f)
+        yaml.dump(reversed_index, f)
 
     print(f"Saved reversed index to {index_path}")
 
