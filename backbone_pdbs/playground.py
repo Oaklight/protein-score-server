@@ -7,14 +7,14 @@ from TMscore import TMscore
 from esm.models.esm3 import ESM3
 from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
-pdb_origin = "pdb/1A0A.pdb"
-pdb_backbone = "pdb/1A0A_backbone.pdb"
-pdb_backbone_2 = "pdb/1A0A_backbone_2.pdb"
-pdb_esm = "pdb/1A0A_esm.pdb"
-pdb_rebuilt = "pdb/1A0A_rebuilt.pdb"
-pdb_rebuilt_pre = "pdb/protein_backbone_cath_4.2/1a0a.A.pdb"
+pdb_origin = "pdb/1A1X.pdb"
+pdb_backbone = "pdb/1A1X_backbone.pdb"
+pdb_backbone_2 = "pdb/1A1X_backbone_2.pdb"
+pdb_esm = "pdb/1A1X_esm.pdb"
+pdb_rebuilt = "pdb/1A1X_rebuilt.pdb"
+pdb_rebuilt_pre = "pdb/protein_backbone_cath_4.2/1a1x.A.pdb"
 
-seq = "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST"
+seq = "GSAGEDVGAPPDHLWVHQEGIYRDEYQRTWVAVVEEETSFLRARVQQIQVPLGDAARPSHLLTSQLPLMWQLYPEERYMDNNSRLWQIQHHLMVRGVQELLLKLLPDD"
 
 
 def strip_pdb():
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     strip_pdb()
     rebuild_pdb()
     modify_residue_sequence_number(pdb_backbone, pdb_backbone_2)
-    esm_fold(seq, 8)
+    esm_fold(seq, 20)
 
     print(f"pdb_origin vs pdb_backbone")
     calc_tmscore(pdb_origin, pdb_backbone)
@@ -182,4 +182,8 @@ if __name__ == "__main__":
 
     print(f"pdb_rebuilt vs pdb_esm")
     calc_tmscore(pdb_rebuilt, pdb_esm)
+    print()
+
+    print(f"pdb_rebuilt_pre vs pdb_esm")
+    calc_tmscore(pdb_rebuilt_pre, pdb_esm)
     print()

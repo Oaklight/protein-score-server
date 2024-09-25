@@ -4,8 +4,6 @@ import queue
 import sys
 import threading
 
-# 忽略FutureWarning和DeprecationWarning
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from time import time
 from uuid import uuid4
@@ -42,6 +40,9 @@ class PredictServer:
 
         with open(config_file, "r") as f:
             self.config = yaml.safe_load(f)
+
+        with open(self.config["backbone_pdb"]["reversed_index"]) as f:
+            self.reversed_index = yaml.safe_load(f)
 
         login(self.config["api_key"])
         self.load_models()
@@ -110,34 +111,41 @@ class PredictServer:
 
         protein, temp_pdb_path = self.predict_structure(task, model)
 
-        match task.type:
+        try:
+            match task.type:
 
-            case "plddt":
-                self.logger.debug(f"[{task.id}] Task type is 'plddt'")
+                case "plddt":
+                    self.logger.debug(f"[{task.id}] Task type is 'plddt'")
 
-                struct = bsio.load_structure(temp_pdb_path, extra_fields=["b_factor"])
-                # this will be the pLDDT, convert to float
-                plddt = struct.b_factor.mean().item()
-                self.logger.debug(f"[{task.id}] pLDDT is {plddt}")
+                    struct = bsio.load_structure(
+                        temp_pdb_path, extra_fields=["b_factor"]
+                    )
+                    # this will be the pLDDT, convert to float
+                    plddt = struct.b_factor.mean().item()
+                    self.logger.debug(f"[{task.id}] pLDDT is {plddt}")
 
-                output_data = plddt
+                    output_data = plddt
 
-            case "tmscore":
-                self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
-                reference_pdb = to_pdb.get_pdb_file(task.name)
-                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
+                case "tmscore":
+                    self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
+                    reference_pdb = to_pdb.get_pdb_file(self.reversed_index, task.name)
+                    self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
 
-                lengths, results = TMscore(reference_pdb, temp_pdb_path)
-                self.logger.debug(f"[{task.id}] Alignment done")
+                    lengths, results = TMscore(reference_pdb, temp_pdb_path)
+                    self.logger.debug(f"[{task.id}] Alignment done")
 
-                self.logger.debug(f"[{task.id}] TMscore is {results}")
+                    self.logger.debug(f"[{task.id}] TMscore is {results}")
 
-                output_data = results[0]
+                    output_data = results[0]
 
-            case _:
-                # not implement
-                raise Exception("Task type not supported")
+                case _:
+                    # not implement
+                    raise Exception("Task type not supported")
+        except Exception as e:
+            self.logger.error(f"[{task.id}] Task failed: {e}")
+            raise e
 
+        # remove task from working pool
         t_predict_done = time() - t_predict
         self.logger.info(f"[{task.id}] Task done in {t_predict_done:.2f} seconds")
         self.release_model(model)  # put model back to available queue

@@ -18,5 +18,6 @@ task_queue_size: 50
 timeout: 15.0 # seconds
 
 backbone_pdb:
+  reversed_index: "backbone_pdbs/pdb/reversed_index.yaml"
   parquet_prefix: "backbone_pdbs/parquet/protein_backbone_cath_"
   pdb_prefix: "backbone_pdbs/pdb/protein_backbone_cath_"

@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-This server is a protein structure prediction tool based on the ESM3 model. It processes prediction requests from users and returns the predicted scores (pLDDT) for protein structures.
+This server is a protein structure prediction tool based on the ESM3 model. It processes prediction requests from users and returns the pLDDT or TM-Score for protein sequences.
 
 ## 2. Installation
 
@@ -28,6 +28,10 @@ The server uses the `server.yaml` file for configuration. Currently configurable
     - `replica`: optional GPU device and replications mapping
 * `task_queue_size`: Task queue size, default to 50.
 * `timeout`: Timeout for async prediction result retrieval, default to 15 seconds.
+* `backbone_pdb`:
+    - `reversed_index`: path for reverse index from pdb id to pdb file path
+    - `parquet_prefix`: path prefix for parquet files
+    - `pdb_prefix`: path prefix for pdb files
 
 After the config are set, run these commands inside the project folder:
 
@@ -46,7 +50,23 @@ Users can send `POST` requests to `http://your-host:8000/predict/` to get predic
 
 * `seq`: String, representing the protein sequence.
 * `name`: String, representing the name of the protein.
-* `type`: String, representing the task type, currently supports "plddt", "tmscore".
+* `type`: String, representing the task type, currently supports **"plddt", "tmscore"**.
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "name": "", # optional
+    "type": "plddt"
+}
+```
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "name": "1a0a.A", # must provide
+    "type": "tmscore"
+}
+```
 
 The server will return a JSON response containing two fields: `job_id` and `prediction` .
 
