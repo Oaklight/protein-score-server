@@ -3,8 +3,8 @@ import os
 import queue
 import sys
 import threading
-
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from time import time
 from uuid import uuid4
 
@@ -52,6 +52,7 @@ class PredictServer:
         self.task_queue = queue.Queue(self.config["task_queue_size"])
         self.working_pool = set()
         self.result_pool = {}
+        self.lock = Lock()
         self.load_history_results()
 
         # initialize thread main executor and process pool executor
@@ -104,7 +105,8 @@ class PredictServer:
         self.model_avail.put(model)
 
     def predict(self, task: PredictTask, model):
-        self.working_pool.add(task.id)
+        with self.lock:
+            self.working_pool.add(task.id)
 
         t_predict = time()
         output_data = None
@@ -151,8 +153,10 @@ class PredictServer:
         self.release_model(model)  # put model back to available queue
 
         # put future into result pool
-        self.result_pool[task.id] = output_data
-        self.working_pool.remove(task.id)
+        with self.lock:
+            self.result_pool[task.id] = output_data
+        with self.lock:
+            self.working_pool.remove(task.id)
 
         self.logger.debug(f"[{task.id}] Task done, result put into result pool")
 
