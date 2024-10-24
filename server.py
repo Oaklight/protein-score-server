@@ -9,13 +9,13 @@ from time import time
 from uuid import uuid4
 
 import biotite.structure.io as bsio
+import requests
 import torch
 import yaml
+from esm.models.esm3 import ESM3
+from esm.sdk.api import ESMProtein, GenerationConfig
 from huggingface_hub import login
 from TMscore import TMscore
-
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESM3InferenceClient, ESMProtein, GenerationConfig
 
 torch.set_warn_always(False)
 
@@ -34,6 +34,57 @@ class PredictTask:
         self.type = type
 
 
+class ProtModel:
+    def __init__(self, model_name, **kwargs):
+        self.model = None
+        self.model_name = model_name
+
+        if self.model_name == "esm3":
+            # Initialize ESM3 model
+            self.model = ESM3.from_pretrained(
+                "esm3_sm_open_v1",
+                device=torch.device(
+                    kwargs.get("device", "cpu"),
+                ),
+            )
+            self.esm_num_steps = kwargs.get("esm_num_steps", 5)
+        elif self.model_name == "esmfold":
+            # Initialize ESMFold API client
+            self.esmfold_api_url = "https://api.esmatlas.com/foldSequence/v1/pdb/"
+        else:
+            raise ValueError("Unsupported model name")
+
+    def predict_structure(self, task: PredictTask, pdb_path):
+        temp_pdb_path = os.path.join(
+            pdb_path, f"result_{self.model_name}_{task.id}.pdb"
+        )
+
+        if self.model_name == "esm3":
+            # Use the ESM3 model to generate structure
+            protein = ESMProtein(sequence=task.seq)
+            protein = self.model.generate(
+                protein,
+                GenerationConfig(track="structure", num_steps=self.esm_num_steps),
+            )
+            protein.to_pdb(temp_pdb_path)
+            del protein
+
+        elif self.model_name == "esmfold":
+            # Use the ESMFold API to generate structure
+            response = requests.post(self.esmfold_api_url, data=task.seq)
+            if response.status_code == 200:
+                # save response.text into a pdb file
+                with open(temp_pdb_path, "w") as pdb_file:
+                    pdb_file.write(response.text)
+            else:
+                temp_pdb_path = None
+                raise Exception(f"API error: {response.status_code}")
+        else:
+            raise ValueError("Unsupported model name")
+
+        return temp_pdb_path
+
+
 class PredictServer:
     def __init__(self, config_file, logger):
         self.logger = logger
@@ -46,41 +97,49 @@ class PredictServer:
 
         login(self.config["api_key"])
         self.load_models()
-        self.esm_num_steps = self.config["model"]["esm_num_steps"]
 
         # initialize task queue, result pool, and result queue
         self.task_queue = queue.Queue(self.config["task_queue_size"])
         self.working_pool = set()
         self.result_pool = {}
         self.lock = Lock()
-        self.load_history_results()
+        # self.load_history_results()
 
         # initialize thread main executor and process pool executor
         self.main_executor = threading.Thread(target=self.run, daemon=True)
         self.main_executor.start()
 
     def load_models(self):
-        model_name, replica = (
+        model_name, placements = (
             self.config["model"]["name"],
             self.config["model"]["replica"],
         )
-
-        placements = self.config["model"]["replica"]
+        print(placements)
         total_replica = sum(placements.values())
         self.model_avail = queue.Queue(total_replica)
 
         t_loading = time()
         for cuda_idx, replica_num in placements.items():
+            print(cuda_idx)
             for j in range(replica_num):
-                model: ESM3InferenceClient = ESM3.from_pretrained(
-                    "esm3_sm_open_v1"
-                ).cuda(cuda_idx)
+
+                if model_name == "esm3":
+                    model = ProtModel(
+                        model_name,
+                        device=f"cuda:{cuda_idx}",
+                        esm_num_steps=self.config["model"]["esm_num_steps"],
+                    )
+                elif model_name == "esmfold":
+                    model = ProtModel(model_name)
+                else:
+                    raise ValueError("Unsupported model name")
+
                 self.model_avail.put(model)
                 self.logger.info(f"cuda:{cuda_idx} [{j}]-th Model {model_name} loaded")
         t_loading_done = time() - t_loading
 
         self.model_executor = ThreadPoolExecutor(max_workers=total_replica)
-        self.logger.info(f"{replica} Models loaded in {t_loading_done} seconds")
+        self.logger.info(f"{placements} Models loaded in {t_loading_done} seconds")
 
     def load_history_results(self):
         if not os.path.exists(self.config["intermediate_pdb_path"]):
@@ -111,7 +170,12 @@ class PredictServer:
         t_predict = time()
         output_data = None
 
-        protein, temp_pdb_path = self.predict_structure(task, model)
+        temp_pdb_path = model.predict_structure(
+            task, self.config["intermediate_pdb_path"]
+        )
+        self.logger.debug(
+            f"[{task.id}] structure prediction done, result saved to {temp_pdb_path}"
+        )
 
         try:
             match task.type:
@@ -161,7 +225,6 @@ class PredictServer:
         self.logger.debug(f"[{task.id}] Task done, result put into result pool")
 
         # Release GPU memory
-        del protein
         del struct
         del output_data
         torch.cuda.empty_cache()
@@ -169,20 +232,6 @@ class PredictServer:
 
         self.logger.debug(self.result_pool)
         return output_data
-
-    def predict_structure(self, task, model):
-        protein = ESMProtein(sequence=task.seq)
-        protein = model.generate(
-            protein,
-            GenerationConfig(track="structure", num_steps=self.esm_num_steps),
-        )
-        temp_pdb_path = os.path.join(
-            self.config["intermediate_pdb_path"], f"result_esm3_{task.id}.pdb"
-        )
-        protein.to_pdb(temp_pdb_path)
-
-        self.logger.debug(f"[{task.id}] Task done, result saved to {temp_pdb_path}")
-        return protein, temp_pdb_path
 
     def run(self):
         self.logger.info("Server is running")

@@ -2,7 +2,8 @@ import json
 from time import sleep, time
 
 import requests
-from tqdm import tqdm
+
+# from tqdm import tqdm
 
 # 定义测试数据
 test_data = {
@@ -23,7 +24,8 @@ test_data_json = json.dumps(test_data)
 job_ids = {}
 t_run = time()
 # 发送POST请求
-for i in tqdm(range(bulk_test)):
+for i in range(bulk_test):
+    print(i)
     response = requests.post(
         f"{config['server']}/predict/",
         data=test_data_json,
@@ -42,12 +44,14 @@ for i in tqdm(range(bulk_test)):
     job_ids[response.json()["job_id"]] = -1
 
 plddt_scores = {}
-for id in tqdm(job_ids):
+for id in job_ids:
+    print(id)
     response = requests.get(
-        f"{config['server']}/result/{id}",
+        f"{config['server']}/result/{id}?timeout=20.0",
         headers={"Content-Type": "application/json"},
     )
-    job_ids[id] = response.json()["prediction"]
+    #    job_ids[id] = response.json()["prediction"]
+    job_ids[id] = response.json()
 t_run_done = time() - t_run
 
 # 打印响应内容

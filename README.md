@@ -1,16 +1,16 @@
-# Instruction for ESM3 Protein Structure Prediction Server
+# Instruction for Protein Structure Score Prediction Server
 
 ## 1. Introduction
 
-This server is a protein structure prediction tool based on the ESM3 model. It processes prediction requests from users and returns the pLDDT or TM-Score for protein sequences.
+This server is a protein structure prediction tool. It processes prediction requests from users and returns the pLDDT or TM-Score for protein sequences.
 
 ## 2. Installation
 
 To install the environment, you need to clone this repository and install the required dependencies.
 
 ```bash
-git clone https://github.com/Oaklight/esm3-plddt-server.git
-cd esm3-plddt-server
+git clone https://github.com/Oaklight/protein-score-server.git
+cd protein-score-server
 conda env create -f env/environment.yaml
 conda activate esm
 pip install -r env/requirements.txt
@@ -24,14 +24,17 @@ The server uses the `server.yaml` file for configuration. Currently configurable
 * `history_path`: History result storage path.
 * `intermediate_pdb_path`: Intermediate PDB file storage path.
 * `model`: Model configuration
-    - `name`: model name, `esm3_sm_open_v1` for now and please don't change
-    - `replica`: optional GPU device and replications mapping
+    - `name`: model name, `esm3` or `esmfold`
+    - `replica`: GPU device and replications mapping, should be in `<device>: <num_replica>` format. For `esmfold` case, use `_: <num_replica>` instead.
+    - `esm_num_steps`: for `esm3` specifically, indicating how many iteration for each sequence's inference
 * `task_queue_size`: Task queue size, default to 50.
 * `timeout`: Timeout for async prediction result retrieval, default to 15 seconds.
 * `backbone_pdb`:
     - `reversed_index`: path for reverse index from pdb id to pdb file path
     - `parquet_prefix`: path prefix for parquet files
     - `pdb_prefix`: path prefix for pdb files
+
+For example, see [ `server.yaml` ](./server.yaml)
 
 After the config are set, run these commands inside the project folder:
 
