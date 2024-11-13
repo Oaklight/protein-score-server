@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import queue
 import sys
@@ -35,9 +36,14 @@ class PredictTask:
 
 
 class ProtModel:
-    def __init__(self, model_name, **kwargs):
+    def __init__(self, model_name, id, **kwargs):
         self.model = None
         self.model_name = model_name
+        self.id = id
+
+        self.logger = logging.getLogger(f"ProtModel_{self.id}")
+        self.logger.addHandler(logging.StreamHandler())
+        self.logger.setLevel(logging.DEBUG)
 
         if self.model_name == "esm3":
             # Initialize ESM3 model
@@ -48,9 +54,11 @@ class ProtModel:
                 ),
             )
             self.esm_num_steps = kwargs.get("esm_num_steps", 5)
+            self.logger.debug("ESM3 model loaded")
         elif self.model_name == "esmfold":
             # Initialize ESMFold API client
             self.esmfold_api_url = "https://api.esmatlas.com/foldSequence/v1/pdb/"
+            self.logger.debug(f"{self.id}-th ESMFold API client loaded")
         else:
             raise ValueError("Unsupported model name")
 
@@ -58,27 +66,33 @@ class ProtModel:
         temp_pdb_path = os.path.join(
             pdb_path, f"result_{self.model_name}_{task.id}.pdb"
         )
+        self.logger.debug(f"Generating structure for {task.id}")
 
         if self.model_name == "esm3":
             # Use the ESM3 model to generate structure
+            self.logger.debug("creating protein")
             protein = ESMProtein(sequence=task.seq)
             protein = self.model.generate(
                 protein,
                 GenerationConfig(track="structure", num_steps=self.esm_num_steps),
             )
+            self.logger.debug("writing protein to pdb")
             protein.to_pdb(temp_pdb_path)
             del protein
 
         elif self.model_name == "esmfold":
             # Use the ESMFold API to generate structure
+            self.logger.debug("sending request")
             response = requests.post(self.esmfold_api_url, data=task.seq)
+            # self.logger.debug(f"{response.text}")
             if response.status_code == 200:
                 # save response.text into a pdb file
+                self.logger.debug("writing response to pdb")
                 with open(temp_pdb_path, "w") as pdb_file:
                     pdb_file.write(response.text)
             else:
                 temp_pdb_path = None
-                raise Exception(f"API error: {response.status_code}")
+                self.logger.debug(f"error! API error: {response.status_code}")
         else:
             raise ValueError("Unsupported model name")
 
@@ -102,8 +116,9 @@ class PredictServer:
         self.task_queue = queue.Queue(self.config["task_queue_size"])
         self.working_pool = set()
         self.result_pool = {}
-        self.lock = Lock()
-        # self.load_history_results()
+        self.lock_workingpool = Lock()
+        self.lock_resultpool = Lock()
+        self.prepare_cache()
 
         # initialize thread main executor and process pool executor
         self.main_executor = threading.Thread(target=self.run, daemon=True)
@@ -126,11 +141,12 @@ class PredictServer:
                 if model_name == "esm3":
                     model = ProtModel(
                         model_name,
+                        id=j,
                         device=f"cuda:{cuda_idx}",
                         esm_num_steps=self.config["model"]["esm_num_steps"],
                     )
                 elif model_name == "esmfold":
-                    model = ProtModel(model_name)
+                    model = ProtModel(model_name, id=j)
                 else:
                     raise ValueError("Unsupported model name")
 
@@ -141,21 +157,25 @@ class PredictServer:
         self.model_executor = ThreadPoolExecutor(max_workers=total_replica)
         self.logger.info(f"{placements} Models loaded in {t_loading_done} seconds")
 
-    def load_history_results(self):
+    def prepare_cache(self, load_history=False):
         if not os.path.exists(self.config["intermediate_pdb_path"]):
             os.makedirs(self.config["intermediate_pdb_path"], exist_ok=True)
             self.logger.info(f"Creating {self.config['intermediate_pdb_path']}")
-        if not os.path.exists(self.config["history_path"]):
-            return
-        with open(self.config["history_path"], "r") as f:
-            self.logger.info(f"Loading {self.config['history_path']}...")
-            bulk_result = f.read()
-            for line in bulk_result.strip().split("\n"):
-                # skip if line is empty
-                if not line.strip():
-                    continue
-                task_id, result = [each.strip() for each in line.strip().split("\t")]
-                self.result_pool[task_id] = float(result)
+
+        if load_history:
+            if not os.path.exists(self.config["history_path"]):
+                return
+            with open(self.config["history_path"], "r") as f:
+                self.logger.info(f"Loading {self.config['history_path']}...")
+                bulk_result = f.read()
+                for line in bulk_result.strip().split("\n"):
+                    # skip if line is empty
+                    if not line.strip():
+                        continue
+                    task_id, result = [
+                        each.strip() for each in line.strip().split("\t")
+                    ]
+                    self.result_pool[task_id] = float(result)
 
     def get_available_model(self):
         return self.model_avail.get()
@@ -164,8 +184,11 @@ class PredictServer:
         self.model_avail.put(model)
 
     def predict(self, task: PredictTask, model):
-        with self.lock:
+        self.logger.debug(f"[{task.id}] Task added to working pool")
+        with self.lock_workingpool:
+            self.logger.debug("work_pool lock acquired")
             self.working_pool.add(task.id)
+        self.logger.debug("working_pool lock released")
 
         t_predict = time()
         output_data = None
@@ -217,9 +240,9 @@ class PredictServer:
         self.release_model(model)  # put model back to available queue
 
         # put future into result pool
-        with self.lock:
+        with self.lock_resultpool:
             self.result_pool[task.id] = output_data
-        with self.lock:
+        with self.lock_workingpool:
             self.working_pool.remove(task.id)
 
         self.logger.debug(f"[{task.id}] Task done, result put into result pool")
