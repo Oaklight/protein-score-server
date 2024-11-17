@@ -2,12 +2,10 @@ import asyncio
 import logging
 import os
 import sys
-from uuid import uuid4
 
 import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from regex import P
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -46,11 +44,23 @@ class ResultResponse(BaseModel):
     prediction: float
 
 
+class StatusResponse(BaseModel):
+    busy_models: int
+    processed_tasks: int
+    remaining_tasks: int
+
+
 # app = FastAPI()
 app = FastAPI(debug=True)
 
 
 predict_server = PredictServer(config_path, logger=logger)
+
+
+@app.get("/status", response_model=StatusResponse)
+async def get_status():
+    status = predict_server.get_status()
+    return StatusResponse(**status)
 
 
 @app.post("/predict/", response_model=PredictResponse)
@@ -59,10 +69,9 @@ async def predict(request: PredictRequest):
     if predict_server.task_queue.full():
         raise HTTPException(status_code=429, detail="Job queue is full")
     task = PredictTask(
-        id=uuid4().hex,
         seq=request.seq,
         name=request.name,
-        type=request.type,
+        task_type=request.type,
     )
     predict_server.task_queue.put(task)
 

@@ -2,8 +2,8 @@ logging_level: DEBUG
 
 api_key: "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"
 
-history_path: "./history_results.tsv"
-history_dump_interval: 60
+history_path: "/scratch/dingpeng/history_results.json"
+history_dump_interval: 600
 intermediate_pdb_path: "/scratch/dingpeng/intermediate_pdbs"
 
 model:
@@ -17,9 +17,9 @@ model:
   replica: # in esmfold case, GPU device can be anything, this will not be read. but replication number should be valid
     _: 20
 
-task_queue_size: 50
+task_queue_size: 500
 
-timeout: 20.0 # seconds
+timeout: 60.0 # seconds
 
 backbone_pdb:
   reversed_index: "backbone_pdbs/pdb/reversed_index.yaml"

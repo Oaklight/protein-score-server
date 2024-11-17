@@ -1,4 +1,5 @@
 import json
+import random
 from time import sleep, time
 
 import requests
@@ -6,26 +7,46 @@ import requests
 # from tqdm import tqdm
 
 # 定义测试数据
-test_data = {
-    "seq": "GSAGEDVGAPPDHLWVHQEGIYRDEYQRTWVAVVEEETSFLRARVQQIQVPLGDAARPSHLLTSQLPLMWQLYPEERYMDNNSRLWQIQHHLMVRGVQELLLKLLPDD",
-    "name": "1a1x.A",
-    "type": "tmscore",
+sequences = {
+    1: {
+        "name": "1a1x.A",
+        "seq": "GSAGEDVGAPPDHLWVHQEGIYRDEYQRTWVAVVEEETSFLRARVQQIQVPLGDAARPSHLLTSQLPLMWQLYPEERYMDNNSRLWQIQHHLMVRGVQELLLKLLPDD",
+    },
+    2: {
+        "name": "1hh5.A",
+        "seq": "MPKKIILICSPHIDDAASIFLAKGDPKINLLAVLTVVGGRSLDTNTKNALLVTDIFGIEGVPVAAGEEEPLVEGRKPKKDEPGEKGIGSIEYPPEFKNKLHGKHAVDLLIELILKYEPKTIILCPVGSLTNLATAIKEAPEIVERIKEIVFSGGGYTSGDATPVAEYTVYFDPEAAAIVFNTKLKVTMVGLDATAQALVTPEIKARIAAVGTRPAAFLLEVLEYYAKLKPAKKDEYGYLSDPLAVAYIIDPDVMTTRKAPASVDLDGEETVGTVVVDFEEPIPEECKTRVAVKVDYEKFWNMIVAALKRIGDPA",
+    },
 }
 
-bulk_test = 2
+
+# Assuming you have a function to generate test data
+def generate_test_data():
+    choice = random.choice([1, 2])
+
+    # Generate random sequence, name, and type
+    return {
+        "seq": sequences[choice]["seq"],
+        "name": sequences[choice]["name"],
+        "type": random.choice(["plddt", "tmscore"]),
+    }
+
+
+bulk_test = 600
 
 config_file = "./client.json"
 with open(config_file, "r") as f:
     config = json.load(f)
 
 # 将测试数据转换为JSON
-test_data_json = json.dumps(test_data)
 
 job_ids = {}
 t_run = time()
 # 发送POST请求
 for i in range(bulk_test):
     print(i)
+    test_data = generate_test_data()
+    test_data_json = json.dumps(test_data)
+
     response = requests.post(
         f"{config['server']}/predict/",
         data=test_data_json,
@@ -43,11 +64,12 @@ for i in range(bulk_test):
         )
     job_ids[response.json()["job_id"]] = -1
 
+print(job_ids)
 plddt_scores = {}
 for id in job_ids:
     print(id)
     response = requests.get(
-        f"{config['server']}/result/{id}?timeout=20.0",
+        f"{config['server']}/result/{id}?timeout=60.0",
         headers={"Content-Type": "application/json"},
     )
     #    job_ids[id] = response.json()["prediction"]
