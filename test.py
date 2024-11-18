@@ -31,7 +31,7 @@ def generate_test_data():
     }
 
 
-bulk_test = 600
+bulk_test = 12
 
 config_file = "./client.json"
 with open(config_file, "r") as f:

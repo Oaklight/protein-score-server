@@ -1,17 +1,18 @@
-import asyncio
-import logging
 import os
 import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+import asyncio
+import logging
 
 import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
-
-
-from server import PredictServer, PredictTask
+from src.server import PredictServer
+from src.task import PredictTask
 
 logger = logging.getLogger(__name__)
 
