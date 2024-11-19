@@ -1,6 +1,6 @@
 import json
 import random
-from time import sleep, time
+import time
 
 import requests
 
@@ -31,51 +31,68 @@ def generate_test_data():
     }
 
 
-bulk_test = 12
+bulk_test = 200
 
 config_file = "./client.json"
 with open(config_file, "r") as f:
     config = json.load(f)
 
-# 将测试数据转换为JSON
-
+# Send POST requests with delay and exponential backoff
 job_ids = {}
-t_run = time()
-# 发送POST请求
+t_run = time.time()
 for i in range(bulk_test):
-    print(i)
+    print(f"Sending request {i+1}/{bulk_test}")
     test_data = generate_test_data()
     test_data_json = json.dumps(test_data)
 
-    response = requests.post(
-        f"{config['server']}/predict/",
-        data=test_data_json,
-        headers={"Content-Type": "application/json"},
-    )
-    while response.status_code != 200:
-        if response.status_code == 429:
-            sleep(10)  # job queue is full, wait for 10 seconds
-        if response.status_code == 408:
-            sleep(10)  # request timeout, wait for 10 seconds
-        response = requests.post(
-            f"{config['server']}/predict/",
-            data=test_data_json,
-            headers={"Content-Type": "application/json"},
-        )
-    job_ids[response.json()["job_id"]] = -1
+    retry_count = 0
+    while retry_count < 5:  # Maximum of 5 retries
+        try:
+            response = requests.post(
+                f"{config['server']}/predict/",
+                data=test_data_json,
+                headers={"Content-Type": "application/json"},
+                timeout=60,  # Increase client-side timeout
+            )
+            if response.status_code == 200:
+                job_ids[response.json()["job_id"]] = -1
+                break
+            elif response.status_code == 429:
+                print("Job queue is full, retrying after delay...")
+                time.sleep(2**retry_count)  # Exponential backoff
+            elif response.status_code == 408:
+                print("Request timeout, retrying after delay...")
+                time.sleep(2**retry_count)  # Exponential backoff
+            retry_count += 1
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            time.sleep(2**retry_count)  # Exponential backoff
 
 print(job_ids)
 plddt_scores = {}
 for id in job_ids:
-    print(id)
-    response = requests.get(
-        f"{config['server']}/result/{id}?timeout=60.0",
-        headers={"Content-Type": "application/json"},
-    )
-    #    job_ids[id] = response.json()["prediction"]
-    job_ids[id] = response.json()
-t_run_done = time() - t_run
+    print(f"Fetching result for job ID: {id}")
+    retry_count = 0
+    while retry_count < 5:  # Maximum of 5 retries
+        try:
+            response = requests.get(
+                f"{config['server']}/result/{id}",
+                headers={"Content-Type": "application/json"},
+                timeout=60,  # Increase client-side timeout
+            )
+            if response.status_code == 200:
+                job_ids[id] = response.json()
+                break
+            elif response.status_code == 202:
+                print("Request timeout, retrying after delay...")
+                time.sleep(2**retry_count)  # Exponential backoff
+            retry_count += 1
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            time.sleep(2**retry_count)  # Exponential backoff
 
-# 打印响应内容
+t_run_done = time.time() - t_run
+
+# Print response content
 print(json.dumps(job_ids, indent=4))
 print(f"Time taken: {t_run_done:.4f} seconds")

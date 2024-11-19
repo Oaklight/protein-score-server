@@ -1,4 +1,5 @@
 import logging
+import os
 from time import time
 
 import requests
@@ -8,6 +9,8 @@ from esm.sdk.api import ESMProtein, GenerationConfig
 
 from task import PredictTask
 
+LAST_ESMFOLD_REQUEST_TIME = 0
+
 
 class ProtModel:
     def __init__(self, model_name, id, **kwargs):
@@ -16,8 +19,10 @@ class ProtModel:
         self.id = id
 
         self.logger = logging.getLogger(f"ProtModel_{self.id}")
-        self.logger.addHandler(logging.StreamHandler())
         self.logger.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        self.logger.addHandler(console_handler)
 
         if self.model_name == "esm3":
             # Initialize ESM3 model
@@ -65,6 +70,8 @@ class ProtModel:
             LAST_ESMFOLD_REQUEST_TIME = time()
 
             response = requests.post(self.esmfold_api_url, data=task.seq)
+            self.logger.debug(response.status_code)
+            self.logger.debug(response.text)
             # self.logger.debug(f"{response.text}")
             if response.status_code == 200:
                 # save response.text into a pdb file

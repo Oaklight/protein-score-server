@@ -4,7 +4,6 @@ import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
-import asyncio
 import logging
 
 import yaml
@@ -14,18 +13,15 @@ from pydantic import BaseModel
 from src.server import PredictServer
 from src.task import PredictTask
 
-logger = logging.getLogger(__name__)
 
 config_path = os.path.join(current_dir, "server.yaml")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
-logger.setLevel(config["logging_level"])
 
-# Create a StreamHandler and set its level to INFO
+logger = logging.getLogger(__name__)
+logger.setLevel(config["logging_level"])
 console_handler = logging.StreamHandler()
 console_handler.setLevel(config["logging_level"])
-
-# Add the StreamHandler to the logger
 logger.addHandler(console_handler)
 
 
@@ -66,7 +62,6 @@ async def get_status():
 
 @app.post("/predict/", response_model=PredictResponse)
 async def predict(request: PredictRequest):
-    logger.debug(request)
     if predict_server.task_queue.full():
         raise HTTPException(status_code=429, detail="Job queue is full")
     task = PredictTask(
@@ -79,36 +74,15 @@ async def predict(request: PredictRequest):
     return PredictResponse(job_id=task.id, prediction="Processing...")
 
 
-async def check_job_status(job_id: str):
-    while job_id in predict_server.working_pool:
-        await asyncio.sleep(1)  # Sleep for 1 second before checking again
-
-    if job_id not in predict_server.result_pool:
-        logger.info(f"job_id is {job_id}")
-        logger.info(f"job_id not in {predict_server.result_pool}")
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    result = predict_server.result_pool[job_id]
-    return result
-
-
-async def wait_for_result(job_id: str, timeout: float):
-    try:
-        result = await asyncio.wait_for(
-            asyncio.shield(check_job_status(job_id)), timeout=timeout
-        )
-        return result
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=408, detail="Request timeout")
-
-
 @app.get("/result/{job_id}", response_model=ResultResponse)
-async def get_result(job_id: str, timeout: float = config["timeout"]):
-    try:
-        result = await wait_for_result(job_id, timeout)
+async def get_result(job_id: str):
+    if job_id in predict_server.result_pool:
+        result = predict_server.result_pool[job_id]
         return ResultResponse(job_id=job_id, prediction=result)
-    except HTTPException as e:
-        raise e
+    elif job_id in predict_server.working_pool:
+        raise HTTPException(status_code=202, detail="Task is still processing")
+    else:
+        raise HTTPException(status_code=404, detail="Task not found")
 
 
 # when app is interrupted, stop the predict server

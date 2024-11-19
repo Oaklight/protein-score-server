@@ -2,9 +2,8 @@ logging_level: DEBUG
 
 api_key: "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"
 
-history_path: "/scratch/dingpeng/history_results.json"
-history_dump_interval: 600
 intermediate_pdb_path: "/scratch/dingpeng/intermediate_pdbs"
+cache_db_path: "/scratch/dingpeng/pdb_cache.db"
 
 model:
   #  name: esm3

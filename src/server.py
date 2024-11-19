@@ -5,9 +5,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
 import gc
-import hashlib
 import json
-import logging
 import os
 import queue
 import sys
@@ -15,26 +13,20 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from time import time
-from uuid import uuid4
 
 import biotite.structure.io as bsio
-import requests
 import torch
 import yaml
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein, GenerationConfig
 from huggingface_hub import login
-from idna import encode
 from TMscore import TMscore
 
 import to_pdb
+from cache import ProtCache
 from model import ProtModel
 from task import PredictTask
 
 torch.set_warn_always(False)
 to_pdb.process()
-
-LAST_ESMFOLD_REQUEST_TIME = 0
 
 
 class PredictServer:
@@ -99,57 +91,49 @@ class PredictServer:
         if not os.path.exists(self.config["intermediate_pdb_path"]):
             os.makedirs(self.config["intermediate_pdb_path"], exist_ok=True)
             self.logger.info(f"Creating {self.config['intermediate_pdb_path']}")
-        self.cache_pool = {}
-        self.last_history_dump = time()
-        self.history_dump_interval = self.config["history_dump_interval"]
 
-        if load_history:
-            if not os.path.exists(self.config["history_path"]):
-                return
-            try:
-                with open(self.config["history_path"], "r") as f:
-                    self.logger.info(f"Loading {self.config['history_path']}...")
-                    self.cache_pool = json.load(f)
-            except Exception as e:
-                self.logger.error(
-                    f"Error loading cache: {e} | history json might be corrupted"
-                )
-                self.cache_pool = {}
-
-    def save_cache(self):
-        self.logger.info("Saving cache...")
-        # save to history_path
-        if not os.path.exists(self.config["history_path"]):
-            os.makedirs(os.path.dirname(self.config["history_path"]), exist_ok=True)
-            self.logger.info(f"Creating {self.config['history_path']}")
-
-        cache_copy = self.cache_pool.copy()
-        with open(self.config["history_path"], "w") as f:
-            json.dump(cache_copy, f)
-
-        self.last_history_dump = time()
-
-        self.logger.info("Cache saved.")
+        self.cache_db = ProtCache(self.config["cache_db_path"])
 
     def get_available_model(self):
         return self.model_avail.get()
 
     def release_model(self, model):
         self.model_avail.put(model)
+        # Release GPU memory
+        if model.model_name in ["esm3"]:
+            torch.cuda.empty_cache()
+            gc.collect()
 
     def _predict_core(self, task: PredictTask, model: ProtModel):
         t_predict = time()
         output_data = None
-        temp_pdb_path = model.predict_structure(
-            task, self.config["intermediate_pdb_path"]
-        )
-        # # sleep
-        # self.logger.debug(
-        #     f"[{task.id}] Too soon! sleep 10s for structure prediction..."
-        # )
-        # time.sleep(10)
 
-        self.logger.debug(
+        # either hit pdb cache or compute new pdb
+        temp_pdb_path = self.cache_db.get(task.seq, table="prot_cache")
+        self.logger.debug(f"[{task.id}] cache get result: {temp_pdb_path}")
+        self.logger.debug("strange!")
+        if temp_pdb_path is None:
+            temp_pdb_path = model.predict_structure(
+                task, self.config["intermediate_pdb_path"]
+            )
+            self.logger.debug(
+                f"[{task.id}] pdb predicted, result saved to {temp_pdb_path}"
+            )
+            self.cache_db.set(task.seq, temp_pdb_path, table="prot_cache")
+        elif not os.path.exists(temp_pdb_path):
+            temp_pdb_path = model.predict_structure(
+                task, self.config["intermediate_pdb_path"]
+            )
+            self.logger.debug(
+                f"[{task.id}] pdb predicted, result saved to {temp_pdb_path}"
+            )
+            self.cache_db.set(task.seq, temp_pdb_path, table="prot_cache")
+        else:
+            self.logger.debug(
+                f"[{task.id}] structure prediction cached, result loaded from {temp_pdb_path}"
+            )
+
+        self.logger.info(
             f"[{task.id}] structure prediction done, result saved to {temp_pdb_path}"
         )
 
@@ -183,6 +167,7 @@ class PredictServer:
                 case _:
                     # not implement
                     raise Exception("Task type not supported")
+
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
             raise e
@@ -195,75 +180,46 @@ class PredictServer:
 
     def predict(self, task: PredictTask, model):
         with self.lock_workingpool:
-            self.logger.debug(
-                f"[{task.id}] work_pool lock acquired | add to working pool"
-            )
             self.working_pool.add(task.id)
-        self.logger.debug(
-            f"[{task.id}] working_pool lock released | add to working pool"
-        )
+        self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
+        self.logger.info(self.working_pool)
 
-        # check cache hit
-        if task.hash in self.cache_pool:
-            self.logger.debug(f"[{task.id}] cache hit")
-            output_data = self.cache_pool[task.hash]["result"]
+        output_data = self.cache_db.get(task.hash, table="task_cache")
+        if output_data is not None:
+            self.logger.debug(f"[{task.id}] Task hit cache: {output_data}")
         else:
             output_data = self._predict_core(task, model)
-            # save to cache
-            self.cache_pool[task.hash] = {
-                "task": task.to_dict(),
-                "model": model.model_name,
-                "result": output_data,
-            }
+            self.logger.debug(f"[{task.id}] {output_data}")
+        # add result to cache
+        self.cache_db.set(task.hash, output_data, table="task_cache")
+
         # put model back to available queue
         self.release_model(model)
 
         # put future into result pool
         with self.lock_resultpool:
-            self.logger.debug(
-                f"[{task.id}] result_pool lock acquired | putting result into result pool"
-            )
             self.result_pool[task.id] = output_data
-        self.logger.debug(
-            f"[{task.id}] result_pool lock released | result put into result pool"
-        )
+        self.logger.debug(f"[{task.id}] result_pool lock | result put into result pool")
         with self.lock_workingpool:
-            self.logger.debug(
-                f"[{task.id}] work_pool lock acquired | item removed from working pool"
-            )
             self.working_pool.remove(task.id)
         self.logger.debug(
-            f"[{task.id}] work_pool lock released | item removed from working pool"
+            f"[{task.id}] work_pool lock | item removed from working pool"
         )
 
-        self.logger.debug(f"[{task.id}] Task done, result put into result pool")
-
-        # Release GPU memory
-        del struct
-        del output_data
-        torch.cuda.empty_cache()
-        gc.collect()
-
+        self.logger.info(f"[{task.id}] Task done, result put into result pool")
         # self.logger.debug(self.result_pool)
-        return output_data
 
     def run(self):
         self.logger.info("Server is running")
         while True:
             task = self.task_queue.get()
             if task is None:
-                self.logger.debug("processing thread received None, exiting...")
+                self.logger.info("processing thread received None, exiting...")
                 break
-            self.logger.debug(f"[{task.id}] Task received")
 
             model = self.get_available_model()  # blocking until a model is available
             self.model_executor.submit(self.predict, task, model)
-            self.logger.debug(f"[{task.id}] Task submitted to pool executor")
-
-            # check if time is multiple of history_dump_interval
-            if time() - self.last_history_dump > self.history_dump_interval:
-                self.logger.debug("Dumping history...")
-                self.save_cache()
+            self.logger.info(f"[{task.id}] Task submitted to pool executor")
 
     def stop_server(self):
         self.logger.info("Stopping server...")
@@ -274,10 +230,8 @@ class PredictServer:
         self.main_executor.join()
         # shutdown the executors
         self.model_executor.shutdown(wait=True)
-
-        # wait for the history dump thread to exit
-        self.stop = True
-        self.save_cache()
+        # shutdown the cache db
+        self.cache_db.close()
 
         self.logger.info("Server stopped. Bye!")
 
