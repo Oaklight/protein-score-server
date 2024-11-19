@@ -1,6 +1,11 @@
+import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
 import argparse
 import glob
-import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Dict, List, Literal
@@ -13,7 +18,8 @@ from tqdm import tqdm
 tqdm.pandas()
 
 current_path = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(current_path, "server.yaml")
+parent_path = os.path.dirname(current_path)
+config_path = os.path.join(parent_path, "server.yaml")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
@@ -22,7 +28,8 @@ def reconstruct_backbone_pdb(
     parquet_path: str,
     output_dir: str,
     atom_wanted: List[Literal["CA", "N", "C", "O"]] = ["CA"],
-    existing_pdb: List[str] = None,
+    existing_pdb: Dict[str, str] = None,
+    root_dir=parent_path,
 ):
     if os.path.exists(output_dir) is False:
         os.makedirs(output_dir)
@@ -32,17 +39,20 @@ def reconstruct_backbone_pdb(
     if existing_pdb is not None:
         df = df[~df["name"].isin(existing_pdb)]
 
+    reversed_index = {
+        each_name: os.path.relpath(each_path, root_dir)
+        for each_name, each_path in existing_pdb.items()
+    }  # reversed index for name to path
+
     executor = ThreadPoolExecutor(max_workers=10)
 
     _write_pdb = partial(write_pdb, output_dir=output_dir, atom_wanted=atom_wanted)
-
-    reversed_index = {}  # reversed index for name to path
 
     for each_name, each_path in tqdm(
         executor.map(_write_pdb, df.to_dict(orient="records"), chunksize=20),
         total=len(df),
     ):
-        reversed_index[each_name] = each_path
+        reversed_index[each_name] = os.path.relpath(each_path, root_dir)
 
     print(f"Done writing pdb files to {output_dir}")
     executor.shutdown()
@@ -99,8 +109,12 @@ def get_pdb_file(reversed_index: Dict[str, str], name: str) -> str:
 
 def process(force=False):
     current_path = os.path.dirname(os.path.abspath(__file__))
-    base_path = os.path.join(current_path, config["backbone_pdb"]["parquet_prefix"])
-    output_dir = os.path.join(current_path, config["backbone_pdb"]["pdb_prefix"])
+    parent_path = os.path.dirname(current_path)
+
+    # define paths
+    base_path = os.path.join(parent_path, config["backbone_pdb"]["parquet_prefix"])
+    output_dir = os.path.join(parent_path, config["backbone_pdb"]["pdb_prefix"])
+    index_path = os.path.join(parent_path, config["backbone_pdb"]["reversed_index"])
 
     reversed_index = {}
     for version in ["4.3", "4.2"]:
@@ -110,10 +124,10 @@ def process(force=False):
             if force:
                 existing_pdb = None
             else:
-                existing_pdb = [
-                    os.path.splitext(os.path.basename(f))[0]
+                existing_pdb = {
+                    os.path.splitext(os.path.basename(f))[0]: f
                     for f in glob.glob(f"{output_dir}{version}/*.pdb")
-                ]
+                }
 
             reversed_index.update(
                 reconstruct_backbone_pdb(
@@ -130,7 +144,6 @@ def process(force=False):
     }
 
     # save reversed index to the same folder of output_dir, rip off the final part from output_dir
-    index_path = os.path.join(current_path, config["backbone_pdb"]["reversed_index"])
     if os.path.exists(index_path):
         with open(index_path, "r") as f:
             # update the file with the new reversed index
