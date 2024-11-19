@@ -6,3 +6,5 @@ uvicorn==0.30.6
 pyyaml==6.0.2
 pyarrow==17.0.0
 git+https://github.com/veghen/TMscore4Python.git
+accelerate==1.1.1
+transformers==4.46.3

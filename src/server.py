@@ -21,12 +21,12 @@ from huggingface_hub import login
 from TMscore import TMscore
 
 import to_pdb
+
 from cache import ProtCache
 from model import ProtModel
 from task import PredictTask
 
 torch.set_warn_always(False)
-to_pdb.process()
 
 
 class PredictServer:
@@ -46,6 +46,7 @@ class PredictServer:
         self.task_queue = queue.Queue(self.config["task_queue_size"])
         self.working_pool = set()
         self.result_pool = {}
+        self.lock_model = Lock()
         self.lock_workingpool = Lock()
         self.lock_resultpool = Lock()
         self.prepare_cache(load_history=True)
@@ -77,6 +78,12 @@ class PredictServer:
                     )
                 elif model_name == "esmfold":
                     model = ProtModel(model_name, id=j)
+                elif model_name == "huggingface_esmfold":
+                    model = ProtModel(
+                        model_name,
+                        id=j,
+                        device=f"cuda:{cuda_idx}",
+                    )
                 else:
                     raise ValueError("Unsupported model name")
 
@@ -95,14 +102,17 @@ class PredictServer:
         self.cache_db = ProtCache(self.config["cache_db_path"])
 
     def get_available_model(self):
-        return self.model_avail.get()
+        with self.lock_model:
+            model = self.model_avail.get()
+        return model
 
     def release_model(self, model):
-        self.model_avail.put(model)
-        # Release GPU memory
-        if model.model_name in ["esm3"]:
-            torch.cuda.empty_cache()
-            gc.collect()
+        with self.lock_model:
+            self.model_avail.put(model)
+        # # Release GPU memory
+        # if model.model_name in ["esm3", "huggingface_esmfold"]:
+        #     torch.cuda.empty_cache()
+        #     gc.collect()
 
     def _predict_core(self, task: PredictTask, model: ProtModel):
         t_predict = time()
@@ -110,8 +120,6 @@ class PredictServer:
 
         # either hit pdb cache or compute new pdb
         temp_pdb_path = self.cache_db.get(task.seq, table="prot_cache")
-        self.logger.debug(f"[{task.id}] cache get result: {temp_pdb_path}")
-        self.logger.debug("strange!")
         if temp_pdb_path is None:
             temp_pdb_path = model.predict_structure(
                 task, self.config["intermediate_pdb_path"]
@@ -120,6 +128,7 @@ class PredictServer:
                 f"[{task.id}] pdb predicted, result saved to {temp_pdb_path}"
             )
             self.cache_db.set(task.seq, temp_pdb_path, table="prot_cache")
+
         elif not os.path.exists(temp_pdb_path):
             temp_pdb_path = model.predict_structure(
                 task, self.config["intermediate_pdb_path"]
@@ -128,9 +137,10 @@ class PredictServer:
                 f"[{task.id}] pdb predicted, result saved to {temp_pdb_path}"
             )
             self.cache_db.set(task.seq, temp_pdb_path, table="prot_cache")
+
         else:
             self.logger.debug(
-                f"[{task.id}] structure prediction cached, result loaded from {temp_pdb_path}"
+                f"[{task.id}] pdb cached, result loaded from {temp_pdb_path}"
             )
 
         self.logger.info(
@@ -166,11 +176,11 @@ class PredictServer:
 
                 case _:
                     # not implement
-                    raise Exception("Task type not supported")
+                    self.logger.error(Exception("Task type not supported"))
 
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
-            raise e
+            self.logger.error(e)
 
         # remove task from working pool
         t_predict_done = time() - t_predict
@@ -224,10 +234,12 @@ class PredictServer:
     def stop_server(self):
         self.logger.info("Stopping server...")
 
+        count_down = 30  # 30 seconds before force stop
+
         # signal the job queue thread to exit
         self.task_queue.put(None)
         # wait for the job queue thread to exit
-        self.main_executor.join()
+        self.main_executor.join(timeout=count_down)
         # shutdown the executors
         self.model_executor.shutdown(wait=True)
         # shutdown the cache db
@@ -236,8 +248,8 @@ class PredictServer:
         self.logger.info("Server stopped. Bye!")
 
     def get_status(self):
-        with self.lock_workingpool:
-            busy_models = len(self.working_pool)
+        with self.lock_model:
+            busy_models = self.model_avail.maxsize - self.model_avail.qsize()
         with self.lock_resultpool:
             processed_tasks = len(self.result_pool)
         remaining_tasks = self.task_queue.qsize()

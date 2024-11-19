@@ -2,8 +2,8 @@ logging_level: DEBUG
 
 api_key: "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"
 
-intermediate_pdb_path: "/scratch/dingpeng/intermediate_pdbs"
-cache_db_path: "/scratch/dingpeng/pdb_cache.db"
+intermediate_pdb_path: "./intermediate_pdbs"
+cache_db_path: "./pdb_cache.db"
 
 model:
   #  name: esm3
@@ -14,7 +14,12 @@ model:
 
   name: esmfold
   replica: # in esmfold case, GPU device can be anything, this will not be read. but replication number should be valid
-    _: 20
+    _: 10
+
+  # name: huggingface_esmfold
+  # replica: # specify the GPU device to use, and the number of replicas for each GPU
+  #   0: 1
+  #   1: 1
 
 task_queue_size: 500
 

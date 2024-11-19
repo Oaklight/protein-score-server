@@ -50,7 +50,9 @@ class StatusResponse(BaseModel):
 # app = FastAPI()
 app = FastAPI(debug=True)
 
+import to_pdb
 
+to_pdb.process()
 predict_server = PredictServer(config_path, logger=logger)
 
 

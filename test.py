@@ -4,7 +4,7 @@ import time
 
 import requests
 
-# from tqdm import tqdm
+bulk_test = 20
 
 # 定义测试数据
 sequences = {
@@ -16,12 +16,20 @@ sequences = {
         "name": "1hh5.A",
         "seq": "MPKKIILICSPHIDDAASIFLAKGDPKINLLAVLTVVGGRSLDTNTKNALLVTDIFGIEGVPVAAGEEEPLVEGRKPKKDEPGEKGIGSIEYPPEFKNKLHGKHAVDLLIELILKYEPKTIILCPVGSLTNLATAIKEAPEIVERIKEIVFSGGGYTSGDATPVAEYTVYFDPEAAAIVFNTKLKVTMVGLDATAQALVTPEIKARIAAVGTRPAAFLLEVLEYYAKLKPAKKDEYGYLSDPLAVAYIIDPDVMTTRKAPASVDLDGEETVGTVVVDFEEPIPEECKTRVAVKVDYEKFWNMIVAALKRIGDPA",
     },
+    3: {
+        "name": "1bkf.A",
+        "seq": "GVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKFDSSRDKNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGVPGIIPPHATLVFDVELLKLE",
+    },
+    4: {
+        "name": "1ezs.A",
+        "seq": "AESVQPLEKIAPYPQAEKGMKRQVIQLTPQEDESTLKVELLIGQTLEVDCNLHRLGGKLENKTLEGAAAAYYVFDKVSSPVSTRMACPDGKKEKKFVTAYLGDAGMLRYNSKLPIVVYTPDNVDVKYRVWKAEEKIDNAVVR",
+    },
 }
 
 
 # Assuming you have a function to generate test data
 def generate_test_data():
-    choice = random.choice([1, 2])
+    choice = random.choice(list(sequences.keys()))
 
     # Generate random sequence, name, and type
     return {
@@ -30,8 +38,6 @@ def generate_test_data():
         "type": random.choice(["plddt", "tmscore"]),
     }
 
-
-bulk_test = 200
 
 config_file = "./client.json"
 with open(config_file, "r") as f:
