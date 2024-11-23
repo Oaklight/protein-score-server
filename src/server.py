@@ -63,6 +63,7 @@ class PredictServer:
         self.logger.info(placements)
         total_replica = sum(placements.values())
         self.model_avail = queue.Queue(total_replica)
+        self.model_status = []
 
         t_loading = time()
         for cuda_idx, replica_num in placements.items():
@@ -88,6 +89,8 @@ class PredictServer:
                     raise ValueError("Unsupported model name")
 
                 self.model_avail.put(model)
+                self.model_status.append(model)
+
                 self.logger.info(f"cuda:{cuda_idx} [{j}]-th Model {model_name} loaded")
         t_loading_done = time() - t_loading
 
@@ -101,18 +104,30 @@ class PredictServer:
 
         self.cache_db = ProtCache(self.config["cache_db_path"])
 
-    def get_available_model(self):
-        with self.lock_model:
-            model = self.model_avail.get()
+    def get_avail_model_nonblocking(self):
+        model = None
+        failed_get_model = 0
+        while model == None:
+            with self.lock_model:
+                try:
+                    model = self.model_avail.get(block=False)
+                except queue.Empty:
+                    model = None
+
+            if model == None:  # sleep after releasing the lock
+                # exponential backoff
+                time.sleep(2**failed_get_model)
+                failed_get_model += 1
         return model
 
     def release_model(self, model):
         with self.lock_model:
             self.model_avail.put(model)
-        # # Release GPU memory
-        # if model.model_name in ["esm3", "huggingface_esmfold"]:
-        #     torch.cuda.empty_cache()
-        #     gc.collect()
+
+        # Release GPU memory
+        if model.model_name in ["esm3", "huggingface_esmfold"]:
+            torch.cuda.empty_cache()
+            gc.collect()
 
     def _predict_core(self, task: PredictTask, model: ProtModel):
         t_predict = time()
@@ -188,7 +203,9 @@ class PredictServer:
 
         return output_data
 
-    def predict(self, task: PredictTask, model):
+    def predict(self, task: PredictTask):
+        model = self.get_avail_model_nonblocking()
+
         with self.lock_workingpool:
             self.working_pool.add(task.id)
         self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
@@ -227,8 +244,7 @@ class PredictServer:
                 self.logger.info("processing thread received None, exiting...")
                 break
 
-            model = self.get_available_model()  # blocking until a model is available
-            self.model_executor.submit(self.predict, task, model)
+            self.model_executor.submit(self.predict, task)
             self.logger.info(f"[{task.id}] Task submitted to pool executor")
 
     def stop_server(self):
@@ -250,9 +266,21 @@ class PredictServer:
     def get_status(self):
         with self.lock_model:
             busy_models = self.model_avail.maxsize - self.model_avail.qsize()
+            # find out which models are busy
+            model_status = [
+                {
+                    "model_name": each.model_name,
+                    "model_id": each.id,
+                    "model_states": each.states.copy(),
+                }
+                for each in self.model_status
+                if each.states["busy"]
+            ]
         with self.lock_resultpool:
             processed_tasks = len(self.result_pool)
         remaining_tasks = self.task_queue.qsize()
+
+        self.logger.info(json.dumps(model_status, indent=4))
 
         return {
             "busy_models": busy_models,

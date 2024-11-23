@@ -1,22 +1,25 @@
 import logging
 import os
+from threading import Semaphore
 from time import time
 
 import requests
-from transformers import AutoTokenizer, EsmForProteinFolding
-
-from task import PredictTask
-
-LAST_ESMFOLD_REQUEST_TIME = 0
-
 import torch
 from esm.models.esm3 import ESM3
 from esm.sdk.api import ESMProtein, GenerationConfig
+
+# Import the ratelimit library
+from ratelimit import limits, sleep_and_retry
+from transformers import AutoTokenizer, EsmForProteinFolding
 from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 from transformers.models.esm.openfold_utils.protein import Protein as OFProtein
 from transformers.models.esm.openfold_utils.protein import to_pdb
 
+from task import PredictTask
+
 torch.backends.cuda.matmul.allow_tf32 = True
+
+global_rate_limiter = Semaphore(5)
 
 
 class ProtModel:
@@ -30,6 +33,14 @@ class ProtModel:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
         self.logger.addHandler(console_handler)
+
+        self.states = {
+            "busy": False,
+            "task_id": None,
+            "task_type": None,
+            "pdb_done": False,
+            "prev_states": None,
+        }
 
         # ########################################
         #               ESM3 Small
@@ -89,6 +100,16 @@ class ProtModel:
         )
         self.logger.debug(f"Generating structure for {task.id}")
 
+        tmp_states = self.states.copy()
+        tmp_states["prev_states"] = None
+        self.states = {
+            "busy": True,
+            "task_id": task.id,
+            "task_type": task.type,
+            "pdb_done": None,
+            "prev_states": tmp_states,
+        }
+
         # ########################################
         #               ESM3 Small
         # ########################################
@@ -114,21 +135,17 @@ class ProtModel:
             # Use the ESMFold API to generate structure
             self.logger.debug("sending request")
 
-            # update LAST_ESMFOLD_REQUEST_TIME
-            global LAST_ESMFOLD_REQUEST_TIME
-            if time() - LAST_ESMFOLD_REQUEST_TIME < 0.5:
-                time.sleep(0.5)
-            LAST_ESMFOLD_REQUEST_TIME = time()
+            response = self.rate_limited_request(task.seq)
 
-            response = requests.post(self.esmfold_api_url, data=task.seq)
-            self.logger.debug(response.status_code)
-            self.logger.debug(response.text)
-            # self.logger.debug(f"{response.text}")
+            # self.logger.debug(response.status_code)
+            # self.logger.debug(response.text)
             if response.status_code == 200:
+                self.states["pdb_done"] = "waiting to write"
                 # save response.text into a pdb file
                 self.logger.debug("writing response to pdb")
                 with open(temp_pdb_path, "w") as pdb_file:
                     pdb_file.write(response.text)
+                self.states["pdb_done"] = "written!"
             else:
                 temp_pdb_path = None
                 self.logger.debug(
@@ -162,7 +179,17 @@ class ProtModel:
         else:
             raise ValueError("Unsupported model name")
 
+        self.states["pdb_done"] = True
+        self.states["busy"] = False
+
         return temp_pdb_path
+
+    @sleep_and_retry
+    @limits(calls=5, period=1)  # 5 calls per second
+    def rate_limited_request(self, seq):
+        with global_rate_limiter:
+            response = requests.post(self.esmfold_api_url, data=seq)
+        return response
 
 
 def convert_outputs_to_pdb(outputs):
