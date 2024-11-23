@@ -10,9 +10,9 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from src import to_pdb
 from src.server import PredictServer
 from src.task import PredictTask
-
 
 config_path = os.path.join(current_dir, "server.yaml")
 with open(config_path, "r") as f:
@@ -50,7 +50,6 @@ class StatusResponse(BaseModel):
 # app = FastAPI()
 app = FastAPI(debug=True)
 
-import to_pdb
 
 to_pdb.process()
 predict_server = PredictServer(config_path, logger=logger)

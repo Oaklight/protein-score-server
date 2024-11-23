@@ -6,20 +6,26 @@ intermediate_pdb_path: "./intermediate_pdbs"
 cache_db_path: "./pdb_cache.db"
 
 model:
-  #  name: esm3
-  #  replica: # specify the GPU device to use, and the number of replicas for each GPU
-  #    0: 3
-  #    1: 3
-  #  esm_num_steps: 5
+  # name: esm3
+  # replica: # specify the GPU device to use, and the number of replicas for each GPU
+  #   0: 3
+  #   1: 3
+  # esm_num_steps: 5
 
-  name: esmfold
-  replica: # in esmfold case, GPU device can be anything, this will not be read. but replication number should be valid
-    _: 10
+  # name: esmfold
+  # replica: # in esmfold case, GPU device can be anything, this will not be read. but replication number should be valid
+  #   _: 10
 
   # name: huggingface_esmfold
   # replica: # specify the GPU device to use, and the number of replicas for each GPU
-  #   0: 1
-  #   1: 1
+  #   0: 2
+  #   1: 2
+
+  name: esmfold_hybrid
+  replica: # specify the GPU replica and api replica
+    0: 2
+    1: 2
+    _: 10 # for esmfold api
 
 task_queue_size: 500
 

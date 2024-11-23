@@ -4,7 +4,7 @@ import time
 
 import requests
 
-bulk_test = 20
+bulk_test = 50
 
 # 定义测试数据
 sequences = {

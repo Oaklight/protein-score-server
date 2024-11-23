@@ -21,7 +21,6 @@ from huggingface_hub import login
 from TMscore import TMscore
 
 import to_pdb
-
 from cache import ProtCache
 from model import ProtModel
 from task import PredictTask
@@ -85,6 +84,15 @@ class PredictServer:
                         id=j,
                         device=f"cuda:{cuda_idx}",
                     )
+                elif model_name == "esmfold_hybrid":
+                    if cuda_idx == "_":  # api part
+                        model = ProtModel("esmfold", id=j)
+                    else:
+                        model = ProtModel(
+                            "huggingface_esmfold",
+                            id=j,
+                            device=f"cuda:{cuda_idx}",
+                        )
                 else:
                     raise ValueError("Unsupported model name")
 
@@ -234,7 +242,6 @@ class PredictServer:
         )
 
         self.logger.info(f"[{task.id}] Task done, result put into result pool")
-        # self.logger.debug(self.result_pool)
 
     def run(self):
         self.logger.info("Server is running")
