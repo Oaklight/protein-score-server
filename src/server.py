@@ -42,10 +42,12 @@ class PredictServer:
         self.load_models()
 
         # initialize task queue, result pool, and result queue
-        self.task_queue = queue.Queue(self.config["task_queue_size"])
+        # self.task_queue = queue.Queue(self.config["task_queue_size"])
+        self.task_queue = queue.PriorityQueue(self.config["task_queue_size"])
+
         self.working_pool = set()
         self.result_pool = {}
-        self.lock_model = Lock()
+
         self.lock_workingpool = Lock()
         self.lock_resultpool = Lock()
         self.prepare_cache(load_history=True)
@@ -63,6 +65,7 @@ class PredictServer:
         total_replica = sum(placements.values())
         self.model_avail = queue.Queue(total_replica)
         self.model_status = []
+        self.lock_model = Lock()
 
         t_loading = time()
         for cuda_idx, replica_num in placements.items():
@@ -115,7 +118,8 @@ class PredictServer:
     def get_avail_model_nonblocking(self):
         model = None
         failed_get_model = 0
-        while model == None:
+        max_fail = 5
+        while model == None and failed_get_model < max_fail:
             with self.lock_model:
                 try:
                     model = self.model_avail.get(block=False)
@@ -137,10 +141,7 @@ class PredictServer:
             torch.cuda.empty_cache()
             gc.collect()
 
-    def _predict_core(self, task: PredictTask, model: ProtModel):
-        t_predict = time()
-        output_data = None
-
+    def _predict_structure(self, task: PredictTask, model: ProtModel):
         # either hit pdb cache or compute new pdb
         temp_pdb_path = self.cache_db.get(task.seq, table="prot_cache")
         if temp_pdb_path is None:
@@ -167,89 +168,117 @@ class PredictServer:
             )
 
         self.logger.info(
-            f"[{task.id}] structure prediction done, result saved to {temp_pdb_path}"
+            f"[{task.id}] structure prediction done, result at {temp_pdb_path}"
         )
+        return temp_pdb_path
 
+    def _predict_score(self, task: PredictTask, pdb_path):
+        output_data = None
+        match task.type:
+
+            case "plddt":
+                self.logger.debug(f"[{task.id}] Task type is 'plddt'")
+
+                struct = bsio.load_structure(pdb_path, extra_fields=["b_factor"])
+                # this will be the pLDDT, convert to float
+                plddt = struct.b_factor.mean().item()
+                self.logger.debug(f"[{task.id}] pLDDT is {plddt}")
+
+                output_data = plddt
+
+            case "tmscore":
+                self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
+                reference_pdb = to_pdb.get_pdb_file(self.reversed_index, task.name)
+                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
+
+                lengths, results = TMscore(reference_pdb, pdb_path)
+                self.logger.debug(f"[{task.id}] Alignment done")
+
+                self.logger.debug(f"[{task.id}] TMscore is {results}")
+
+                output_data = results[0]
+
+            case _:
+                # not implement
+                self.logger.error(Exception("Task type not supported"))
+
+        return output_data
+
+    def _predict_core(self, task: PredictTask, model: ProtModel):
+        # ========== predict structure ==========
+        temp_pdb_path = None
         try:
-            match task.type:
-
-                case "plddt":
-                    self.logger.debug(f"[{task.id}] Task type is 'plddt'")
-
-                    struct = bsio.load_structure(
-                        temp_pdb_path, extra_fields=["b_factor"]
-                    )
-                    # this will be the pLDDT, convert to float
-                    plddt = struct.b_factor.mean().item()
-                    self.logger.debug(f"[{task.id}] pLDDT is {plddt}")
-
-                    output_data = plddt
-
-                case "tmscore":
-                    self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
-                    reference_pdb = to_pdb.get_pdb_file(self.reversed_index, task.name)
-                    self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
-
-                    lengths, results = TMscore(reference_pdb, temp_pdb_path)
-                    self.logger.debug(f"[{task.id}] Alignment done")
-
-                    self.logger.debug(f"[{task.id}] TMscore is {results}")
-
-                    output_data = results[0]
-
-                case _:
-                    # not implement
-                    self.logger.error(Exception("Task type not supported"))
-
+            temp_pdb_path = self._predict_structure(task, model)
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
             self.logger.error(e)
+            # raise custom error: structure_failure, you need to define it
+        if temp_pdb_path is None:
+            raise Exception("structure_failure")
 
-        # remove task from working pool
-        t_predict_done = time() - t_predict
-        self.logger.info(f"[{task.id}] Task done in {t_predict_done:.2f} seconds")
+        # ========== predict score ==========
+        output_data = None
+        try:
+            output_data = self._predict_score(task, temp_pdb_path)
+        except Exception as e:
+            self.logger.error(f"[{task.id}] Task failed: {e}")
+            self.logger.error(e)
+        if output_data is None:
+            raise Exception("score_failure")
 
         return output_data
 
     def predict(self, task: PredictTask):
         model = self.get_avail_model_nonblocking()
+        if model is None:
+            self.logger.error(f"[{task.id}] No model available!")
+            self.task_queue.put((task.priority, task.create_time, task))
 
         with self.lock_workingpool:
             self.working_pool.add(task.id)
         self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
         self.logger.info(self.working_pool)
 
-        output_data = self.cache_db.get(task.hash, table="task_cache")
-        if output_data is not None:
-            self.logger.debug(f"[{task.id}] Task hit cache: {output_data}")
+        try:
+            output_data = self.cache_db.get(task.hash, table="task_cache")
+            if output_data is not None:
+                self.logger.debug(f"[{task.id}] Task hit cache: {output_data}")
+            else:
+                output_data = self._predict_core(task, model)
+                self.logger.debug(f"[{task.id}] {output_data}")
+            # add result to cache
+            self.cache_db.set(task.hash, output_data, table="task_cache")
+        except Exception as e:
+            self.logger.error(f"[{task.id}] Task failed: {e}")
+            self.logger.error(e)
+            # re-enqueue task
+            with self.lock_workingpool:
+                self.working_pool.remove(task.id)
+            self.logger.debug(
+                f"[{task.id}] work_pool lock | item removed from working pool"
+            )
+            self.task_queue.put((task.priority, task.create_time, task))
         else:
-            output_data = self._predict_core(task, model)
-            self.logger.debug(f"[{task.id}] {output_data}")
-        # add result to cache
-        self.cache_db.set(task.hash, output_data, table="task_cache")
-
-        # put model back to available queue
-        self.release_model(model)
-
-        # put future into result pool
-        with self.lock_resultpool:
-            self.result_pool[task.id] = output_data
-        self.logger.debug(f"[{task.id}] result_pool lock | result put into result pool")
-        with self.lock_workingpool:
-            self.working_pool.remove(task.id)
-        self.logger.debug(
-            f"[{task.id}] work_pool lock | item removed from working pool"
-        )
-
-        self.logger.info(f"[{task.id}] Task done, result put into result pool")
+            # put future into result pool
+            with self.lock_resultpool:
+                self.result_pool[task.id] = output_data
+            self.logger.debug(
+                f"[{task.id}] result_pool lock | result put into result pool"
+            )
+            self.logger.info(f"[{task.id}] Task done, result put into result pool")
+        finally:
+            # put model back to available queue
+            self.release_model(model)
 
     def run(self):
         self.logger.info("Server is running")
         while True:
-            task = self.task_queue.get()
+            priority, _, task = self.task_queue.get()
             if task is None:
                 self.logger.info("processing thread received None, exiting...")
                 break
+            # in case it got inserted again, bump up priority
+            task.priority = priority - 1
 
             self.model_executor.submit(self.predict, task)
             self.logger.info(f"[{task.id}] Task submitted to pool executor")
@@ -260,7 +289,8 @@ class PredictServer:
         count_down = 30  # 30 seconds before force stop
 
         # signal the job queue thread to exit
-        self.task_queue.put(None)
+        # self.task_queue.put((None)) # has highest priority
+        self.task_queue.put((-sys.maxsize, time.time(), None))
         # wait for the job queue thread to exit
         self.main_executor.join(timeout=count_down)
         # shutdown the executors
@@ -272,7 +302,13 @@ class PredictServer:
 
     def get_status(self):
         with self.lock_model:
-            busy_models = self.model_avail.maxsize - self.model_avail.qsize()
+            # busy_models = self.model_avail.maxsize - self.model_avail.qsize()
+
+            busy_models = {
+                f"[{each.id}]_{each.model_name}": each.states["busy"]
+                for each in self.model_status
+            }
+
             # find out which models are busy
             model_status = [
                 {
@@ -285,7 +321,11 @@ class PredictServer:
             ]
         with self.lock_resultpool:
             processed_tasks = len(self.result_pool)
+
         remaining_tasks = self.task_queue.qsize()
+
+        with self.lock_workingpool:
+            working_tasks = list(self.working_pool.copy())
 
         self.logger.info(json.dumps(model_status, indent=4))
 
@@ -293,6 +333,7 @@ class PredictServer:
             "busy_models": busy_models,
             "processed_tasks": processed_tasks,
             "remaining_tasks": remaining_tasks,
+            "working_tasks": working_tasks,
         }
 
 

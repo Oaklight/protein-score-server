@@ -1,4 +1,6 @@
 logging_level: DEBUG
+info_log_file: "esm.log"
+error_log_file: "esm.error"
 
 api_key: "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"
 

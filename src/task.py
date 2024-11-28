@@ -1,10 +1,11 @@
 import hashlib
 import json
+import time
 from uuid import uuid4
 
 
 class PredictTask:
-    def __init__(self, seq, name, task_type):
+    def __init__(self, seq, name, task_type, priority=0):
         self.id = uuid4().hex
         self.seq = seq
         self.name = name
@@ -12,6 +13,8 @@ class PredictTask:
         self.hash = hashlib.md5(
             json.dumps({"seq": seq, "name": name, "type": task_type}).encode("utf-8")
         ).hexdigest()
+        self.priority = priority  # smaller number, higher priority
+        self.create_time = time.time()
 
     def to_dict(self):
         return {

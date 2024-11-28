@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Dict, List
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -18,10 +19,31 @@ config_path = os.path.join(current_dir, "server.yaml")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
+# Create a logger
 logger = logging.getLogger(__name__)
 logger.setLevel(config["logging_level"])
+
+# Create a file handler for INFO and DEBUG messages
+info_handler = logging.FileHandler(config["info_log_file"])
+info_handler.setLevel(logging.INFO)  # Set the handler level to INFO
+
+# Create a file handler for ERROR and higher messages
+error_handler = logging.FileHandler(config["error_log_file"])
+error_handler.setLevel(logging.ERROR)  # Set the handler level to ERROR
+
+# Create a console handler for all levels (if needed)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(config["logging_level"])
+
+# Create formatters and add them to the handlers
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+info_handler.setFormatter(formatter)
+error_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Add the handlers to the logger
+logger.addHandler(info_handler)
+logger.addHandler(error_handler)
 logger.addHandler(console_handler)
 
 
@@ -42,9 +64,12 @@ class ResultResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    busy_models: int
+    busy_models: Dict[
+        str, bool
+    ]  # This will directly return a dictionary of string to bool mapping
     processed_tasks: int
     remaining_tasks: int
+    working_tasks: List[str]  # This will directly return a list of strings
 
 
 # app = FastAPI()
@@ -70,7 +95,7 @@ async def predict(request: PredictRequest):
         name=request.name,
         task_type=request.type,
     )
-    predict_server.task_queue.put(task)
+    predict_server.task_queue.put((task.priority, task.create_time, task))
 
     return PredictResponse(job_id=task.id, prediction="Processing...")
 
