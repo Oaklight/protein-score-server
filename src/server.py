@@ -12,7 +12,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-from time import time
+import time
 
 import biotite.structure.io as bsio
 import torch
@@ -45,7 +45,7 @@ class PredictServer:
         # self.task_queue = queue.Queue(self.config["task_queue_size"])
         self.task_queue = queue.PriorityQueue(self.config["task_queue_size"])
 
-        self.working_pool = set()
+        self.working_pool = {}
         self.result_pool = {}
 
         self.lock_workingpool = Lock()
@@ -67,33 +67,34 @@ class PredictServer:
         self.model_status = []
         self.lock_model = Lock()
 
-        t_loading = time()
+        t_loading = time.time()
+        all_idx = -1
         for cuda_idx, replica_num in placements.items():
             self.logger.info(cuda_idx)
             for j in range(replica_num):
-
+                all_idx += 1
                 if model_name == "esm3":
                     model = ProtModel(
                         model_name,
-                        id=j,
+                        id=all_idx,
                         device=f"cuda:{cuda_idx}",
                         esm_num_steps=self.config["model"]["esm_num_steps"],
                     )
                 elif model_name == "esmfold":
-                    model = ProtModel(model_name, id=j)
+                    model = ProtModel(model_name, id=all_idx)
                 elif model_name == "huggingface_esmfold":
                     model = ProtModel(
                         model_name,
-                        id=j,
+                        id=all_idx,
                         device=f"cuda:{cuda_idx}",
                     )
                 elif model_name == "esmfold_hybrid":
                     if cuda_idx == "_":  # api part
-                        model = ProtModel("esmfold", id=j)
+                        model = ProtModel("esmfold", id=all_idx)
                     else:
                         model = ProtModel(
                             "huggingface_esmfold",
-                            id=j,
+                            id=all_idx,
                             device=f"cuda:{cuda_idx}",
                         )
                 else:
@@ -103,7 +104,7 @@ class PredictServer:
                 self.model_status.append(model)
 
                 self.logger.info(f"cuda:{cuda_idx} [{j}]-th Model {model_name} loaded")
-        t_loading_done = time() - t_loading
+        t_loading_done = time.time() - t_loading
 
         self.model_executor = ThreadPoolExecutor(max_workers=total_replica)
         self.logger.info(f"{placements} Models loaded in {t_loading_done} seconds")
@@ -235,7 +236,7 @@ class PredictServer:
             self.task_queue.put((task.priority, task.create_time, task))
 
         with self.lock_workingpool:
-            self.working_pool.add(task.id)
+            self.working_pool[task.id] = "WIP"
         self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
         self.logger.info(self.working_pool)
 
@@ -252,19 +253,17 @@ class PredictServer:
             self.logger.error(f"[{task.id}] Task failed: {e}")
             self.logger.error(e)
             # re-enqueue task
-            with self.lock_workingpool:
-                self.working_pool.remove(task.id)
-            self.logger.debug(
-                f"[{task.id}] work_pool lock | item removed from working pool"
-            )
             self.task_queue.put((task.priority, task.create_time, task))
+
+            # pop task from working pool
+            with self.lock_workingpool:  # remove task.id element from working pool
+                self.working_pool.pop(task.id, None)
         else:
             # put future into result pool
             with self.lock_resultpool:
                 self.result_pool[task.id] = output_data
-            self.logger.debug(
-                f"[{task.id}] result_pool lock | result put into result pool"
-            )
+            with self.lock_workingpool:
+                self.working_pool.pop(task.id, None)
             self.logger.info(f"[{task.id}] Task done, result put into result pool")
         finally:
             # put model back to available queue
