@@ -64,7 +64,8 @@ class ResultResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    busy_models: Dict[
+    busy_models: int
+    busy_models_details: Dict[
         str, bool
     ]  # This will directly return a dictionary of string to bool mapping
     processed_tasks: int

@@ -1,3 +1,4 @@
+import heapq
 import os
 import sys
 
@@ -10,9 +11,9 @@ import os
 import queue
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-import time
 
 import biotite.structure.io as bsio
 import torch
@@ -56,6 +57,18 @@ class PredictServer:
         self.main_executor = threading.Thread(target=self.run, daemon=True)
         self.main_executor.start()
 
+    def _add_model(self, model, is_init=False):
+        with self.lock_model:
+            self.model_avail.append(model)  # defer heapify to get_avail_model
+
+        if model.gpu_model:
+            # only clear cache when needed
+            if is_init or (
+                torch.cuda.memory_allocated(model.device)
+                > 0.8 * torch.cuda.get_device_properties(model.device).total_memory
+            ):
+                torch.cuda.empty_cache()
+
     def load_models(self):
         model_name, placements = (
             self.config["model"]["name"],
@@ -63,7 +76,7 @@ class PredictServer:
         )
         self.logger.info(placements)
         total_replica = sum(placements.values())
-        self.model_avail = queue.Queue(total_replica)
+        self.model_avail = []  # use heaqq to maintain
         self.model_status = []
         self.lock_model = Lock()
 
@@ -100,10 +113,11 @@ class PredictServer:
                 else:
                     raise ValueError("Unsupported model name")
 
-                self.model_avail.put(model)
+                self._add_model(model, is_init=True)
                 self.model_status.append(model)
 
                 self.logger.info(f"cuda:{cuda_idx} [{j}]-th Model {model_name} loaded")
+
         t_loading_done = time.time() - t_loading
 
         self.model_executor = ThreadPoolExecutor(max_workers=total_replica)
@@ -116,15 +130,22 @@ class PredictServer:
 
         self.cache_db = ProtCache(self.config["cache_db_path"])
 
-    def get_avail_model_nonblocking(self):
+    def get_avail_model(self, require_gpu=False):
         model = None
         failed_get_model = 0
         max_fail = 5
+
         while model == None and failed_get_model < max_fail:
             with self.lock_model:
                 try:
-                    model = self.model_avail.get(block=False)
-                except queue.Empty:
+                    if require_gpu:
+                        if require_gpu:
+                            # Heapify the entire list to maintain the heap property
+                            heapq.heapify(self.model_avail)
+                            model = heapq.heappop(self.model_avail)
+                    else:
+                        model = self.model_avail.pop()
+                except IndexError:
                     model = None
 
             if model == None:  # sleep after releasing the lock
@@ -134,13 +155,7 @@ class PredictServer:
         return model
 
     def release_model(self, model):
-        with self.lock_model:
-            self.model_avail.put(model)
-
-        # Release GPU memory
-        if model.model_name in ["esm3", "huggingface_esmfold"]:
-            torch.cuda.empty_cache()
-            gc.collect()
+        self._add_model(model)
 
     def _predict_structure(self, task: PredictTask, model: ProtModel):
         # either hit pdb cache or compute new pdb
@@ -230,7 +245,7 @@ class PredictServer:
         return output_data
 
     def predict(self, task: PredictTask):
-        model = self.get_avail_model_nonblocking()
+        model = self.get_avail_model(task.require_gpu)
         if model is None:
             self.logger.error(f"[{task.id}] No model available!")
             self.task_queue.put((task.priority, task.create_time, task))
@@ -253,6 +268,8 @@ class PredictServer:
             self.logger.error(f"[{task.id}] Task failed: {e}")
             self.logger.error(e)
             # re-enqueue task
+            task.require_gpu = True
+            task.priority -= 10
             self.task_queue.put((task.priority, task.create_time, task))
 
             # pop task from working pool
@@ -302,11 +319,11 @@ class PredictServer:
     def get_status(self):
         with self.lock_model:
             # busy_models = self.model_avail.maxsize - self.model_avail.qsize()
-
-            busy_models = {
+            busy_models_details = {
                 f"[{each.id}]_{each.model_name}": each.states["busy"]
                 for each in self.model_status
             }
+            busy_models = sum(list(busy_models_details.values()))
 
             # find out which models are busy
             model_status = [
@@ -330,6 +347,7 @@ class PredictServer:
 
         return {
             "busy_models": busy_models,
+            "busy_models_details": busy_models_details,
             "processed_tasks": processed_tasks,
             "remaining_tasks": remaining_tasks,
             "working_tasks": working_tasks,

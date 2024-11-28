@@ -1,7 +1,7 @@
 import logging
 import os
+import time
 from threading import Semaphore
-from time import time
 
 import requests
 import torch
@@ -34,6 +34,10 @@ class ProtModel:
         console_handler.setLevel(logging.DEBUG)
         self.logger.addHandler(console_handler)
 
+        self.gpu_model = False
+        self.last_called = time.time()
+        self.priority = 0
+
         self.states = {
             "busy": False,
             "task_id": None,
@@ -47,6 +51,8 @@ class ProtModel:
         # ########################################
 
         if self.model_name == "esm3":
+            self.gpu_model = True
+            self.priority = 1
 
             # Initialize ESM3 model
             self.device = torch.device(
@@ -64,6 +70,8 @@ class ProtModel:
         # ########################################
 
         elif self.model_name == "esmfold":
+            self.priority = 2
+
             # Initialize ESMFold API client
             self.esmfold_api_url = "https://api.esmatlas.com/foldSequence/v1/pdb/"
             self.logger.debug(f"{self.id}-th ESMFold API client loaded")
@@ -73,6 +81,8 @@ class ProtModel:
         # ########################################
 
         elif self.model_name == "huggingface_esmfold":
+            self.gpu_model = True
+            self.priority = 0
 
             # Initialize Hugging Face ESMFold model
             self.tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
@@ -94,12 +104,18 @@ class ProtModel:
         else:
             raise ValueError("Unsupported model name")
 
+    def __lt__(self, other):
+        if self.priority == other.priority:
+            return self.last_called < other.last_called
+        return self.priority < other.priority
+
     def predict_structure(self, task: PredictTask, pdb_path):
         temp_pdb_path = os.path.join(
             pdb_path, f"result_{self.model_name}_{task.id}.pdb"
         )
         self.logger.debug(f"Generating structure for {task.id}")
 
+        self.last_called = time.time()
         tmp_states = self.states.copy()
         tmp_states["prev_states"] = None
         self.states = {

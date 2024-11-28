@@ -15,6 +15,7 @@ class PredictTask:
         ).hexdigest()
         self.priority = priority  # smaller number, higher priority
         self.create_time = time.time()
+        self.require_gpu = False
 
     def to_dict(self):
         return {
