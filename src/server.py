@@ -1,5 +1,6 @@
 import heapq
 import os
+import random
 import sys
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -144,7 +145,11 @@ class PredictServer:
                             heapq.heapify(self.model_avail)
                             model = heapq.heappop(self.model_avail)
                     else:
-                        model = self.model_avail.pop()
+                        # Randomly select an element and remove it
+                        if self.model_avail:
+                            model = random.choice(self.model_avail)
+                            self.model_avail.remove(model)
+                        # model = self.model_avail.pop()
                 except IndexError:
                     model = None
 
