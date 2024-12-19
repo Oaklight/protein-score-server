@@ -40,6 +40,9 @@ class PredictServer:
         with open(self.config["backbone_pdb"]["reversed_index"]) as f:
             self.reversed_index = yaml.safe_load(f)
 
+        with open(self.config["backbone_pdb"]["name_seq_map"]) as f:
+            self.name_seq_map = yaml.safe_load(f)
+
         login(self.config["api_key"])
         self.load_models()
 

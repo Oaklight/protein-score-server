@@ -24,9 +24,53 @@ with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
 
+def extract_name_seq_map(parquet_path: str) -> Dict[str, str]:
+    """
+    Extracts the name and sequence mapping from the Parquet file.
+
+    Parameters:
+    parquet_path (str): Path to the Parquet file containing the data.
+
+    Returns:
+    Dict[str, str]: A dictionary mapping each name to its corresponding sequence.
+    """
+    df = pd.read_parquet(parquet_path)
+    return {row["name"]: row["seq"] for _, row in df.iterrows()}
+
+
+def get_sequence_by_name(name_seq_map: Dict[str, str], name: str) -> str | None:
+    """
+    Returns the sequence corresponding to the given name.
+
+    Parameters:
+    name_seq_map (Dict[str, str]): The dictionary mapping names to sequences.
+    name (str): The name for which to find the sequence.
+
+    Returns:
+    str | None: The corresponding sequence if found, otherwise None.
+    """
+    return name_seq_map.get(name)
+
+
+def get_name_by_sequence(name_seq_map: Dict[str, str], sequence: str) -> str | None:
+    """
+    Returns the name corresponding to the given sequence.
+
+    Parameters:
+    name_seq_map (Dict[str, str]): The dictionary mapping names to sequences.
+    sequence (str): The sequence for which to find the name.
+
+    Returns:
+    str | None: The corresponding name if found, otherwise None.
+    """
+    reverse_map = {seq: name for name, seq in name_seq_map.items()}
+    return reverse_map.get(sequence)
+
+
 def reconstruct_backbone_pdb(
     parquet_path: str,
     output_dir: str,
+    pdb_executor: ThreadPoolExecutor,
     atom_wanted: List[Literal["CA", "N", "C", "O"]] = ["CA"],
     existing_pdb: Dict[str, str] = None,
     root_dir=parent_path,
@@ -44,18 +88,15 @@ def reconstruct_backbone_pdb(
         for each_name, each_path in existing_pdb.items()
     }  # reversed index for name to path
 
-    executor = ThreadPoolExecutor(max_workers=10)
-
     _write_pdb = partial(write_pdb, output_dir=output_dir, atom_wanted=atom_wanted)
 
     for each_name, each_path in tqdm(
-        executor.map(_write_pdb, df.to_dict(orient="records"), chunksize=20),
+        pdb_executor.map(_write_pdb, df.to_dict(orient="records"), chunksize=20),
         total=len(df),
     ):
         reversed_index[each_name] = os.path.relpath(each_path, root_dir)
 
     print(f"Done writing pdb files to {output_dir}")
-    executor.shutdown()
 
     return reversed_index
 
@@ -108,6 +149,8 @@ def get_pdb_file(reversed_index: Dict[str, str], name: str) -> str:
 
 
 def process(force=False):
+    pdb_executor = ThreadPoolExecutor(max_workers=10)
+
     current_path = os.path.dirname(os.path.abspath(__file__))
     parent_path = os.path.dirname(current_path)
 
@@ -115,7 +158,11 @@ def process(force=False):
     base_path = os.path.join(parent_path, config["backbone_pdb"]["parquet_prefix"])
     output_dir = os.path.join(parent_path, config["backbone_pdb"]["pdb_prefix"])
     index_path = os.path.join(parent_path, config["backbone_pdb"]["reversed_index"])
+    name_seq_map_path = os.path.join(
+        parent_path, config["backbone_pdb"]["name_seq_map"]
+    )
 
+    name_seq_map = {}
     reversed_index = {}
     for version in ["4.3", "4.2"]:
         for split in ["validation", "test"]:
@@ -129,10 +176,16 @@ def process(force=False):
                     for f in glob.glob(f"{output_dir}{version}/*.pdb")
                 }
 
+            name_seq_map.update(
+                extract_name_seq_map(
+                    parquet_path=f"{base_path}{version}/{split}.parquet"
+                )
+            )
             reversed_index.update(
                 reconstruct_backbone_pdb(
                     parquet_path=f"{base_path}{version}/{split}.parquet",
                     output_dir=f"{output_dir}{version}",
+                    pdb_executor=pdb_executor,
                     atom_wanted=["N", "CA", "C", "O"],
                     existing_pdb=existing_pdb,
                 )
@@ -151,6 +204,17 @@ def process(force=False):
         reversed_index.update(existing_index)
     with open(index_path, "w") as f:
         yaml.dump(reversed_index, f)
+
+    # save name_seq_map to the same folder of output_dir, rip off the final part from output_dir
+    if os.path.exists(name_seq_map_path):
+        with open(name_seq_map_path, "r") as f:
+            # update the file with the new name_seq_map
+            existing_name_seq_map = yaml.safe_load(f) or {}
+        name_seq_map.update(existing_name_seq_map)
+    with open(name_seq_map_path, "w") as f:
+        yaml.dump(name_seq_map, f)
+
+    pdb_executor.shutdown()
 
     print(f"Saved reversed index to {index_path}")
 

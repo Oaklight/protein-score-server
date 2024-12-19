@@ -165,3 +165,4 @@ intermediate_pdbs/
 backbone_pdbs/pdb/
 protein-score-server.code-workspace
 rsync-lambda.sh
+.aider*
