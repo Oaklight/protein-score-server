@@ -1,5 +1,28 @@
 # Instruction for Protein Structure Score Prediction Server
 
+## 0. TODO
+
+sc-tmscore
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "seq2": "xxxxx", # same as name corresponding seq
+    "name": "1a0a.A", # must provide
+    "type": "sc-tmscore"
+}
+```
+
+pdb
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "name": "1a0a.A", # must provide
+    "type": "pdb"
+}
+```
+
 ## 1. Introduction
 
 This server is a protein structure prediction tool. It processes prediction requests from users and returns the pLDDT or TM-Score for protein sequences.
