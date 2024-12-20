@@ -165,9 +165,14 @@ class PredictServer:
     def release_model(self, model):
         self._add_model(model)
 
-    def _predict_structure(self, task: PredictTask, model: ProtModel):
+    def _predict_structure(
+        self, task: PredictTask, model: ProtModel, for_seq2: bool = False
+    ):
         # either hit pdb cache or compute new pdb
-        temp_pdb_path = self.cache_db.get(task.seq, table="prot_cache")
+        if for_seq2:
+            temp_pdb_path = self.cache_db.get(task.seq2, table="prot_cache")
+        else:
+            temp_pdb_path = self.cache_db.get(task.seq, table="prot_cache")
         if temp_pdb_path is None:
             temp_pdb_path = model.predict_structure(
                 task, self.config["intermediate_pdb_path"]
@@ -196,9 +201,17 @@ class PredictServer:
         )
         return temp_pdb_path
 
-    def _predict_score(self, task: PredictTask, pdb_path):
+    def _downstream_task(
+        self, task: PredictTask, pdb_path, pdb_path2=None
+    ) -> float | str:
         output_data = None
         match task.type:
+            case "pdb":
+                self.logger.debug(f"[{task.id}] Task type is 'pdb'")
+                # read the content of the pdb and return it
+                with open(pdb_path, "r") as f:
+                    output_data = f.read()
+                self.logger.debug(f"[{task.id}] PDB content read and returned")
 
             case "plddt":
                 self.logger.debug(f"[{task.id}] Task type is 'plddt'")
@@ -212,13 +225,25 @@ class PredictServer:
 
             case "tmscore":
                 self.logger.debug(f"[{task.id}] Task type is 'tmscore'")
-                reference_pdb = to_pdb.get_pdb_file(self.reversed_index, task.name)
-                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb}")
+                reference_pdb_path = to_pdb.get_pdb_file(self.reversed_index, task.name)
+                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb_path}")
 
-                lengths, results = TMscore(reference_pdb, pdb_path)
+                lengths, results = TMscore(reference_pdb_path, pdb_path)
                 self.logger.debug(f"[{task.id}] Alignment done")
 
                 self.logger.debug(f"[{task.id}] TMscore is {results}")
+
+                output_data = results[0]
+
+            case "sc-tmscore":
+                self.logger.debug(f"[{task.id}] Task type is 'sc-tmscore'")
+                reference_pdb_path = pdb_path2
+                self.logger.debug(f"[{task.id}] Reference pdb is {reference_pdb_path}")
+
+                lengths, results = TMscore(reference_pdb_path, pdb_path)
+                self.logger.debug(f"[{task.id}] Alignment done")
+
+                self.logger.debug(f"[{task.id}] sc-TMscore is {results}")
 
                 output_data = results[0]
 
@@ -232,6 +257,9 @@ class PredictServer:
         # ========== predict structure ==========
         temp_pdb_path = None
         try:
+            temp_pdb_path2 = None
+            if task.seq2:
+                temp_pdb_path2 = self._predict_structure(task, model, for_seq2=True)
             temp_pdb_path = self._predict_structure(task, model)
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
@@ -243,7 +271,7 @@ class PredictServer:
         # ========== predict score ==========
         output_data = None
         try:
-            output_data = self._predict_score(task, temp_pdb_path)
+            output_data = self._downstream_task(task, temp_pdb_path, temp_pdb_path2)
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
             self.logger.error(e)
@@ -263,6 +291,21 @@ class PredictServer:
         self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
         self.logger.info(self.working_pool)
 
+        # preprocess task, find seq for seq2 if only name provided
+        if task.name:
+            temp_seq2 = to_pdb.get_sequence_by_name(self.name_seq_map, task.name)
+            if temp_seq2:
+                task.seq2 = temp_seq2
+            else:
+                self.logger.warning(
+                    f"[{task.id}] No sequence found for name {task.name}"
+                )
+                if task.type == "sc-tmscore":
+                    task.type = "tmscore"
+                    self.logger.warning(
+                        f"[{task.id}] Task type changed to 'tmscore' due to missing sequence for name {task.name}"
+                    )
+
         try:
             output_data = self.cache_db.get(task.hash, table="task_cache")
             if output_data is not None:
@@ -274,7 +317,7 @@ class PredictServer:
             self.cache_db.set(task.hash, output_data, table="task_cache")
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
-            self.logger.error(e)
+
             # re-enqueue task
             task.require_gpu = True
             task.priority -= 10
@@ -289,6 +332,7 @@ class PredictServer:
                 self.result_pool[task.id] = output_data
             with self.lock_workingpool:
                 self.working_pool.pop(task.id, None)
+
             self.logger.info(f"[{task.id}] Task done, result put into result pool")
         finally:
             # put model back to available queue

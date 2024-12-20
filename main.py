@@ -60,7 +60,7 @@ class PredictResponse(BaseModel):
 
 class ResultResponse(BaseModel):
     job_id: str
-    prediction: float
+    prediction: float | str
 
 
 class StatusResponse(BaseModel):
