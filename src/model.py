@@ -105,6 +105,16 @@ class ProtModel:
             raise ValueError("Unsupported model name")
 
     def __lt__(self, other):
+        """
+        Compare two ProtModel instances based on priority and last called time.
+
+        Args:
+            other (ProtModel): Another ProtModel instance to compare against.
+
+        Returns:
+            bool: True if this model has a higher priority or the same priority and
+                  was last called before the other model, False otherwise.
+        """
         if self.priority == other.priority:
             return self.last_called < other.last_called
         return self.priority < other.priority

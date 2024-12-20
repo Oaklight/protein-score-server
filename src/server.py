@@ -319,7 +319,6 @@ class PredictServer:
             temp_pdb_path = self._predict_structure(task, model)
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
-            self.logger.error(e)
             # raise custom error: structure_failure, you need to define it
         if temp_pdb_path is None:
             raise Exception("structure_failure")
@@ -330,7 +329,6 @@ class PredictServer:
             output_data = self._downstream_task(task, temp_pdb_path, temp_pdb_path2)
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
-            self.logger.error(e)
         if output_data is None:
             raise Exception("score_failure")
 
@@ -339,7 +337,7 @@ class PredictServer:
     def predict(self, task: PredictTask):
         model = self.get_avail_model(task.require_gpu)
         if model is None:
-            self.logger.error(f"[{task.id}] No model available!")
+            self.logger.warning(f"[{task.id}] No model available!")
             self.task_queue.put((task.priority, task.create_time, task))
 
         with self.lock_workingpool:

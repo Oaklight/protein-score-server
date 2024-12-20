@@ -74,13 +74,36 @@ def reconstruct_backbone_pdb(
     atom_wanted: List[Literal["CA", "N", "C", "O"]] = ["CA"],
     existing_pdb: Dict[str, str] = None,
     root_dir=parent_path,
-):
-    if os.path.exists(output_dir) is False:
+) -> Dict[str, str]:
+    """
+    Reconstructs PDB files from a Parquet file containing structure information,
+    writing them to the specified output directory. Skips structures that already
+    have corresponding PDB files in the provided map.
+
+    Parameters:
+    parquet_path (str): The filesystem path to the Parquet file.
+    output_dir (str): The directory where the PDB files should be output.
+    pdb_executor (ThreadPoolExecutor): Executor to provide a pool of threads to run.
+    atom_wanted (List[Literal["CA", "N", "C", "O"]]): The specific atoms to
+        include when reconstructing the backbone PDB structure. Defaults to only
+        include "CA" (Alpha Carbon) if not provided.
+    existing_pdb (Dict[str, str]): A pre-existing mapping of names to filesystem
+        paths for structures that have already been reconstructed to PDB files.
+        Defaults to None.
+    root_dir (str): The root filesystem path, used to construct relative paths in
+        the output. Defaults to the parent of the current script's directory.
+
+    Returns:
+    Dict[str, str]: A mapping of structure names to relative paths of the output PDB
+        files, including structures output during this call and those included in
+        the existing_pdb mapping.
+    """
+    if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     df = pd.read_parquet(parquet_path)
     # skip those matching rows with existing pdb files, match column "name"
-    if existing_pdb is not None:
+    if existing_pdb:
         df = df[~df["name"].isin(existing_pdb)]
 
     reversed_index = {
