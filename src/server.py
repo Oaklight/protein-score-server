@@ -62,6 +62,17 @@ class PredictServer:
         self.main_executor.start()
 
     def _add_model(self, model, is_init=False):
+        """
+        Adds a model to the available models list and handles GPU memory management.
+
+        Parameters:
+        model (ProtModel): The model to be added.
+        is_init (bool): Indicates if this is the initial model load.
+
+        The function appends the model to the model_avail list and performs a heapify
+        operation if necessary. It also manages GPU memory by clearing the cache if the
+        GPU memory usage exceeds 80% of the total memory or if it's an initial model load.
+        """
         with self.lock_model:
             self.model_avail.append(model)  # defer heapify to get_avail_model
 
@@ -135,28 +146,35 @@ class PredictServer:
         self.cache_db = ProtCache(self.config["cache_db_path"])
 
     def get_avail_model(self, require_gpu=False):
+        """
+        Retrieves an available model from the model queue.
+
+        Args:
+            require_gpu (bool): Whether the model needs a GPU.
+
+        Returns:
+            ProtModel or None: An available model if found, else None.
+        """
         model = None
         failed_get_model = 0
         max_fail = 5
 
-        while model == None and failed_get_model < max_fail:
+        while model is None and failed_get_model < max_fail:
             with self.lock_model:
                 try:
                     if require_gpu:
-                        if require_gpu:
-                            # Heapify the entire list to maintain the heap property
-                            heapq.heapify(self.model_avail)
-                            model = heapq.heappop(self.model_avail)
+                        # Heapify the entire list to maintain the heap property
+                        heapq.heapify(self.model_avail)
+                        model = heapq.heappop(self.model_avail)
                     else:
                         # Randomly select an element and remove it
                         if self.model_avail:
                             model = random.choice(self.model_avail)
                             self.model_avail.remove(model)
-                        # model = self.model_avail.pop()
                 except IndexError:
                     model = None
 
-            if model == None:  # sleep after releasing the lock
+            if model is None:  # sleep after releasing the lock
                 # exponential backoff
                 time.sleep(2**failed_get_model)
                 failed_get_model += 1
@@ -167,7 +185,21 @@ class PredictServer:
 
     def _predict_structure(
         self, task: PredictTask, model: ProtModel, for_seq2: bool = False
-    ):
+    ) -> str:
+        """
+        Predicts the protein structure for a given task. If a cached structure exists,
+        it loads the cached structure; otherwise, it computes a new structure and caches it.
+
+        Args:
+            task (PredictTask): The task containing the sequence information for structure prediction.
+            model (ProtModel): The model used for predicting the protein structure.
+            for_seq2 (bool, optional): If True, uses the secondary sequence (seq2) from the task
+                                    for prediction; otherwise, uses the primary sequence (seq).
+                                    Defaults to False.
+
+        Returns:
+            str: The file path to the predicted or cached protein structure PDB file.
+        """
         # either hit pdb cache or compute new pdb
         if for_seq2:
             temp_pdb_path = self.cache_db.get(task.seq2, table="prot_cache")
@@ -204,6 +236,30 @@ class PredictServer:
     def _downstream_task(
         self, task: PredictTask, pdb_path, pdb_path2=None
     ) -> float | str:
+        """
+        Executes a downstream task based on the task type specified in the PredictTask object.
+
+        Parameters:
+        ----------
+        task : PredictTask
+            An object representing the task to be executed. It includes the task type and name.
+        pdb_path : str
+            The file path to the PDB file needed for the task.
+        pdb_path2 : str, optional
+            The file path to the second PDB file, required for tasks that involve comparing two PDB structures.
+
+        Returns:
+        -------
+        float | str
+            - If the task type is "pdb", returns the content of the PDB file as a string.
+            - If the task type is "plddt", returns the mean pLDDT value as a float.
+            - If the task type is "tmscore" or "sc-tmscore", returns the TMscore value as a float.
+
+        Raises:
+        -------
+        Exception
+            If the task type is not supported, an exception is logged, and None is returned.
+        """
         output_data = None
         match task.type:
             case "pdb":
