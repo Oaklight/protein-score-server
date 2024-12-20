@@ -100,6 +100,7 @@ or
     "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
     "type": "pdb"
 }
+```
 
 The server will return a JSON response containing two fields: `job_id` and `prediction` .
 
