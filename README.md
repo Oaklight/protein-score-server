@@ -1,28 +1,5 @@
 # Instruction for Protein Structure Score Prediction Server
 
-## 0. TODO
-
-sc-tmscore
-
-```json
-{
-    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
-    "seq2": "xxxxx", # same as name corresponding seq
-    "name": "1a0a.A", # must provide
-    "type": "sc-tmscore"
-}
-```
-
-pdb
-
-```json
-{
-    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
-    "name": "1a0a.A", # must provide
-    "type": "pdb"
-}
-```
-
 ## 1. Introduction
 
 This server is a protein structure prediction tool. It processes prediction requests from users and returns the pLDDT or TM-Score for protein sequences.
@@ -72,27 +49,57 @@ For details, please refer to [test.py](./test.py)
 
 ### 4.1. Request Prediction
 
-Users can send `POST` requests to `http://your-host:8000/predict/` to get predictions. The request body should contain two fields: `seq` , `name` and `type` .
+Users can send `POST` requests to `http://your-host:8000/predict/` to get predictions. The request body comprises of these fields: `seq` , `name` , `type` , `seq2` .
 
 * `seq`: String, representing the protein sequence.
-* `name`: String, representing the name of the protein.
-* `type`: String, representing the task type, currently supports **"plddt", "tmscore"**.
+* `name`: String, representing the name of the reference protein.
+* `type`: String, representing the task type, currently supports **"plddt", "tmscore", "sc-tmscore", "pdb"**.
+* `seq2`: String, representing the sequence of the reference protein. **Used only for `sc-tmscore` task. You may choose to provide either `seq2` or `name`**
+
+**pLDDT**
 
 ```json
 {
     "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
-    "name": "", # optional
     "type": "plddt"
 }
 ```
 
+**TMscore**
+
 ```json
 {
     "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
-    "name": "1a0a.A", # must provide
+    "name": "1a0a.A", # must provide for tasks that require a reference structure
     "type": "tmscore"
 }
 ```
+
+**sc-TMscore**
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "seq2": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST", # choose to provide either seq2 or name
+    "type": "sc-tmscore"
+}
+
+or
+
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "name": "1a0a.A", # choose to provide either seq2 or name
+    "type": "sc-tmscore"
+}
+```
+
+**pdb**
+
+```json
+{
+    "seq": "MKRESHKHAEQARRNRLAVALHELASLIPAEWKQQNVSAAPSKATTVEAACRYIRHLQQNGST",
+    "type": "pdb"
+}
 
 The server will return a JSON response containing two fields: `job_id` and `prediction` .
 
