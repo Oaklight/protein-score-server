@@ -35,7 +35,7 @@ def generate_test_data():
     return {
         "seq": sequences[choice]["seq"],
         "name": sequences[choice]["name"],
-        "type": random.choice(["plddt", "tmscore"]),
+        "type": random.choice(["plddt", "tmscore", "sc-tmscore", "pdb"]),
     }
 
 
