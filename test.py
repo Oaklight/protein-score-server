@@ -4,28 +4,29 @@ import time
 
 import requests
 
-bulk_test = 10
+bulk_test = 1
 
 # 定义测试数据
 sequences = {
-    1: {
-        "name": "1a1x.A",
-        "seq": "GSAGEDVGAPPDHLWVHQEGIYRDEYQRTWVAVVEEETSFLRARVQQIQVPLGDAARPSHLLTSQLPLMWQLYPEERYMDNNSRLWQIQHHLMVRGVQELLLKLLPDD",
-    },
-    2: {
-        "name": "1hh5.A",
-        "seq": "MPKKIILICSPHIDDAASIFLAKGDPKINLLAVLTVVGGRSLDTNTKNALLVTDIFGIEGVPVAAGEEEPLVEGRKPKKDEPGEKGIGSIEYPPEFKNKLHGKHAVDLLIELILKYEPKTIILCPVGSLTNLATAIKEAPEIVERIKEIVFSGGGYTSGDATPVAEYTVYFDPEAAAIVFNTKLKVTMVGLDATAQALVTPEIKARIAAVGTRPAAFLLEVLEYYAKLKPAKKDEYGYLSDPLAVAYIIDPDVMTTRKAPASVDLDGEETVGTVVVDFEEPIPEECKTRVAVKVDYEKFWNMIVAALKRIGDPA",
-    },
-    3: {
-        "name": "1bkf.A",
-        "seq": "GVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKFDSSRDKNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGVPGIIPPHATLVFDVELLKLE",
-    },
-    4: {
-        "name": "1ezs.A",
-        "seq": "AESVQPLEKIAPYPQAEKGMKRQVIQLTPQEDESTLKVELLIGQTLEVDCNLHRLGGKLENKTLEGAAAAYYVFDKVSSPVSTRMACPDGKKEKKFVTAYLGDAGMLRYNSKLPIVVYTPDNVDVKYRVWKAEEKIDNAVVR",
-    },
+    # 1: {
+    #     "name": "1a1x.A",
+    #     "seq": "GSAGEDVGAPPDHLWVHQEGIYRDEYQRTWVAVVEEETSFLRARVQQIQVPLGDAARPSHLLTSQLPLMWQLYPEERYMDNNSRLWQIQHHLMVRGVQELLLKLLPDD",
+    # },
+    # 2: {
+    #     "name": "1hh5.A",
+    #     "seq": "MPKKIILICSPHIDDAASIFLAKGDPKINLLAVLTVVGGRSLDTNTKNALLVTDIFGIEGVPVAAGEEEPLVEGRKPKKDEPGEKGIGSIEYPPEFKNKLHGKHAVDLLIELILKYEPKTIILCPVGSLTNLATAIKEAPEIVERIKEIVFSGGGYTSGDATPVAEYTVYFDPEAAAIVFNTKLKVTMVGLDATAQALVTPEIKARIAAVGTRPAAFLLEVLEYYAKLKPAKKDEYGYLSDPLAVAYIIDPDVMTTRKAPASVDLDGEETVGTVVVDFEEPIPEECKTRVAVKVDYEKFWNMIVAALKRIGDPA",
+    # },
+    # 3: {
+    #     "name": "1bkf.A",
+    #     "seq": "GVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKFDSSRDKNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGVPGIIPPHATLVFDVELLKLE",
+    # },
+    # 4: {
+    #     "name": "1ezs.A",
+    #     "seq": "AESVQPLEKIAPYPQAEKGMKRQVIQLTPQEDESTLKVELLIGQTLEVDCNLHRLGGKLENKTLEGAAAAYYVFDKVSSPVSTRMACPDGKKEKKFVTAYLGDAGMLRYNSKLPIVVYTPDNVDVKYRVWKAEEKIDNAVVR",
+    # },
     5: {
         "seq": "MAEVIRSSAFWRSFPIFEEFDSETLCELSGIASYRKWSAGTVIFQRGDQGDYMIVVVSGRIKLSLFTPQGRELMLRQHEAGALFGEMALLDGQPRSADATAVTAAEGYVIGKKDFLALITQRPKTAEAVIRFLCAQLRDTTDRLETIALYDLNARVARFFLATLRQIHGSEMPQSANLRLTLSQTDIASILGASRPKVNRAILSLEESGAIKRADGIICCNVGRLLSIADPEEDLEHHHHHHHH",
+        "seq2": "MAEVIRSSAFWRSFPIFEEFDSETLCELSGIASYRKWSAGTVIFQRGDQGDYMIVVVSGRIKLSLFTPQGRELMLRQHEAGALFGEMALLDGQPRSADATAVTAAEGYVIGKKDFLALITQRPKTAEAVIRFLCAQLRDTTDRLETIALYDLNARVARFFLATLRQIHGSEMPQSANLRLTLSQTDIASILGASRPKVNRAILSLEESGAIKRADGIICCNVGRLLSIADPEEDLEHHHHHHHH",
     },
 }
 
@@ -39,12 +40,14 @@ def generate_test_data():
         "seq": sequences[choice]["seq"],
         "type": random.choice(
             [
-                "plddt",
-                "tmscore",
+                # "plddt",
+                # "tmscore",
                 "sc-tmscore",
-                "pdb",
+                # "pdb",
             ]
         ),
+        "seq2": sequences[choice].get("seq2", None),  # Include seq2 if it exists
+        "name": sequences[choice].get("name", None),  # Default name if not specified
     }
 
     # Include name if it exists in the sequences dictionary
@@ -67,6 +70,7 @@ for i in range(bulk_test):
     test_data_json = json.dumps(test_data)
 
     retry_count = 0
+    sleep_base = 3
     while retry_count < 5:  # Maximum of 5 retries
         try:
             response = requests.post(
@@ -79,22 +83,37 @@ for i in range(bulk_test):
                 job_ids[response.json()["job_id"]] = -1
                 break
             elif response.status_code == 429:
-                print("Job queue is full, retrying after delay...")
-                time.sleep(2**retry_count)  # Exponential backoff
+                sleep_interval = sleep_base**retry_count
+                print(f"Job queue is full, retrying after delay... {sleep_interval}s")
+                time.sleep(sleep_interval)  # Exponential backoff
             elif response.status_code == 408:
-                print("Request timeout, retrying after delay...")
-                time.sleep(2**retry_count)  # Exponential backoff
+                sleep_interval = sleep_base**retry_count
+                print(f"Request timeout, retrying after delay... {sleep_interval}s")
+                time.sleep(sleep_interval)  # Exponential backoff
+            elif response.status_code == 400:
+                print(f"Bad request: {response.text}")
+                break
+            elif response.status_code == 500:
+                print(f"Server error: {response.text}")
+                break
+            else:
+                print(f"Unexpected status code: {response.status_code}")
+                sleep_interval = sleep_base**retry_count
+                print(f"Request failed, retrying after delay... {sleep_interval}s")
+                time.sleep(sleep_interval)  # Exponential backoff
             retry_count += 1
         except requests.exceptions.RequestException as e:
+            sleep_interval = sleep_base**retry_count
             print(f"Request failed: {e}")
-            time.sleep(2**retry_count)  # Exponential backoff
+            time.sleep(sleep_interval)  # Exponential backoff
 
 print(job_ids)
 plddt_scores = {}
 for id in job_ids:
     print(f"Fetching result for job ID: {id}")
     retry_count = 0
-    while retry_count < 5:  # Maximum of 5 retries
+    sleep_base = 3
+    while retry_count <= 5:  # Maximum of 5 retries
         try:
             response = requests.get(
                 f"{config['server']}/result/{id}",
@@ -105,8 +124,11 @@ for id in job_ids:
                 job_ids[id] = response.json()
                 break
             elif response.status_code == 202:
-                print("Request timeout, retrying after delay...")
-                time.sleep(2**retry_count)  # Exponential backoff
+                sleep_interval = sleep_base**retry_count
+                print(
+                    f"Job is processing, be patient, retrying after delay... {sleep_interval}s"
+                )
+                time.sleep(sleep_interval)  # Exponential backoff
             retry_count += 1
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
