@@ -4,7 +4,7 @@ import time
 
 import requests
 
-bulk_test = 50
+bulk_test = 10
 
 # 定义测试数据
 sequences = {
@@ -24,6 +24,9 @@ sequences = {
         "name": "1ezs.A",
         "seq": "AESVQPLEKIAPYPQAEKGMKRQVIQLTPQEDESTLKVELLIGQTLEVDCNLHRLGGKLENKTLEGAAAAYYVFDKVSSPVSTRMACPDGKKEKKFVTAYLGDAGMLRYNSKLPIVVYTPDNVDVKYRVWKAEEKIDNAVVR",
     },
+    5: {
+        "seq": "MAEVIRSSAFWRSFPIFEEFDSETLCELSGIASYRKWSAGTVIFQRGDQGDYMIVVVSGRIKLSLFTPQGRELMLRQHEAGALFGEMALLDGQPRSADATAVTAAEGYVIGKKDFLALITQRPKTAEAVIRFLCAQLRDTTDRLETIALYDLNARVARFFLATLRQIHGSEMPQSANLRLTLSQTDIASILGASRPKVNRAILSLEESGAIKRADGIICCNVGRLLSIADPEEDLEHHHHHHHH",
+    },
 }
 
 
@@ -32,11 +35,23 @@ def generate_test_data():
     choice = random.choice(list(sequences.keys()))
 
     # Generate random sequence, name, and type
-    return {
+    test_data = {
         "seq": sequences[choice]["seq"],
-        "name": sequences[choice]["name"],
-        "type": random.choice(["plddt", "tmscore", "sc-tmscore", "pdb"]),
+        "type": random.choice(
+            [
+                "plddt",
+                "tmscore",
+                "sc-tmscore",
+                "pdb",
+            ]
+        ),
     }
+
+    # Include name if it exists in the sequences dictionary
+    if "name" in sequences[choice]:
+        test_data["name"] = sequences[choice]["name"]
+
+    return test_data
 
 
 config_file = "./client.json"
