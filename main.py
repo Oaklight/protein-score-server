@@ -50,6 +50,7 @@ logger.addHandler(console_handler)
 class PredictRequest(BaseModel):
     seq: str
     name: Optional[str] = None
+    seq2: Optional[str] = None
     type: str
 
 
@@ -96,6 +97,7 @@ async def predict(request: PredictRequest):
         seq=request.seq,
         name=request.name,
         task_type=request.type,
+        seq2=request.seq2,
     )
 
     validate_value = task.validate()
