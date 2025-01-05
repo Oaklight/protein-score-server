@@ -1,11 +1,19 @@
 import hashlib
 import json
 import time
+from typing import Literal
 from uuid import uuid4
 
 
 class PredictTask:
-    def __init__(self, seq, name, task_type, seq2=None, priority=0):
+    def __init__(
+        self,
+        seq,
+        name=None,
+        task_type: Literal["pdb", "plddt", "tmscore", "sc-tmscore"] = "plddt",
+        seq2=None,
+        priority=0,
+    ):
         self.id = uuid4().hex
         self.seq = seq
         self.name = name  # name of reference sequence
