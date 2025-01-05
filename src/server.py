@@ -130,7 +130,7 @@ class PredictServer:
                     model = ProtModel(
                         model_name,
                         id=all_idx,
-                        device="cuda:{cuda_idx}",
+                        device=f"cuda:{cuda_idx}",
                     )
                 else:
                     raise ValueError("Unsupported model name")
