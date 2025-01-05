@@ -91,13 +91,26 @@ async def get_status():
 async def predict(request: PredictRequest):
     if predict_server.task_queue.full():
         raise HTTPException(status_code=429, detail="Job queue is full")
+
     task = PredictTask(
         seq=request.seq,
         name=request.name,
         task_type=request.type,
     )
-    predict_server.task_queue.put((task.priority, task.create_time, task))
 
+    validate_value = task.validate()
+    if validate_value == 0:
+        predict_server.task_queue.put((task.priority, task.create_time, task))
+    else:
+        error_messages = {
+            1: "Sequence (seq) is required but missing",
+            2: "Second sequence (seq2) or name is required for tmscore task type",
+            3: "Second sequence (seq2) or name is required for sc-tmscore task type",
+            4: f"Unknown task type: {request.type}",
+        }
+        raise HTTPException(
+            status_code=400, detail=error_messages.get(validate_value, "Invalid task")
+        )
     return PredictResponse(job_id=task.id, prediction="Processing...")
 
 
