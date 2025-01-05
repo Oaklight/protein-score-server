@@ -102,14 +102,14 @@ class PredictServer:
             self.logger.info(cuda_idx)
             for j in range(replica_num):
                 all_idx += 1
-                if model_name == "esm3":
-                    model = ProtModel(
-                        model_name,
-                        id=all_idx,
-                        device=f"cuda:{cuda_idx}",
-                        esm_num_steps=self.config["model"]["esm_num_steps"],
-                    )
-                elif model_name == "esmfold":
+                # if model_name == "esm3":
+                #     model = ProtModel(
+                #         model_name,
+                #         id=all_idx,
+                #         device=f"cuda:{cuda_idx}",
+                #         esm_num_steps=self.config["model"]["esm_num_steps"],
+                #     )
+                if model_name == "esmfold":
                     model = ProtModel(model_name, id=all_idx)
                 elif model_name == "huggingface_esmfold":
                     model = ProtModel(

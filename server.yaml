@@ -23,11 +23,16 @@ model:
   #   0: 2
   #   1: 2
 
-  name: esmfold_hybrid
+  # name: esmfold_hybrid
+  # replica: # specify the GPU replica and api replica
+  #   0: 3
+  #   1: 3
+  #   _: 6 # for esmfold api
+
+  name: alphafold3
   replica: # specify the GPU replica and api replica
-    0: 3
-    1: 3
-    _: 6 # for esmfold api
+    6: 14
+    7: 14
 
 task_queue_size: 500
 

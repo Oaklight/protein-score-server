@@ -24,9 +24,8 @@ The server uses the `server.yaml` file for configuration. Currently configurable
 * `history_path`: History result storage path.
 * `intermediate_pdb_path`: Intermediate PDB file storage path.
 * `model`: Model configuration
-    - `name`: model name, `esm3` or `esmfold`
+    - `name`: model name, `esmfold` or `protenix (bytedances' alphafold3 implementation)`
     - `replica`: GPU device and replications mapping, should be in `<device>: <num_replica>` format. For `esmfold` case, use `_: <num_replica>` instead.
-    - `esm_num_steps`: for `esm3` specifically, indicating how many iteration for each sequence's inference
 * `task_queue_size`: Task queue size, default to 50.
 * `timeout`: Timeout for async prediction result retrieval, default to 15 seconds.
 * `backbone_pdb`:

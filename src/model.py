@@ -18,8 +18,9 @@ from biotite.structure.io import pdb, pdbx
 from configs.configs_base import configs as configs_base
 from configs.configs_data import data_configs
 from configs.configs_inference import inference_configs
-from esm.models.esm3 import ESM3
-from esm.sdk.api import ESMProtein, GenerationConfig
+
+# from esm.models.esm3 import ESM3
+# from esm.sdk.api import ESMProtein, GenerationConfig
 from protenix.config import parse_configs
 
 # Import the ratelimit library
@@ -69,30 +70,30 @@ class ProtModel:
             "prev_states": None,
         }
 
-        # ########################################
-        #               ESM3 Small
-        # ########################################
+        # # ########################################
+        # #               ESM3 Small
+        # # ########################################
 
-        if self.model_name == "esm3":
-            self.gpu_model = True
-            self.priority = 1
+        # if self.model_name == "esm3":
+        #     self.gpu_model = True
+        #     self.priority = 1
 
-            # Initialize ESM3 model
-            self.device = torch.device(
-                kwargs.get("device", "cpu"),
-            )
-            self.model = ESM3.from_pretrained(
-                "esm3_sm_open_v1",
-                device=self.device,
-            )
-            self.esm_num_steps = kwargs.get("esm_num_steps", 5)
-            self.logger.debug("ESM3 model loaded")
+        #     # Initialize ESM3 model
+        #     self.device = torch.device(
+        #         kwargs.get("device", "cpu"),
+        #     )
+        #     self.model = ESM3.from_pretrained(
+        #         "esm3_sm_open_v1",
+        #         device=self.device,
+        #     )
+        #     self.esm_num_steps = kwargs.get("esm_num_steps", 5)
+        #     self.logger.debug("ESM3 model loaded")
 
         # ########################################
         #           ESMFold Meta API
         # ########################################
 
-        elif self.model_name == "esmfold":
+        if self.model_name == "esmfold":
             self.priority = 2
 
             # Initialize ESMFold API client
@@ -192,28 +193,28 @@ class ProtModel:
             "prev_states": tmp_states,
         }
 
-        # ########################################
-        #               ESM3 Small
-        # ########################################
+        # # ########################################
+        # #               ESM3 Small
+        # # ########################################
 
-        if self.model_name == "esm3":
+        # if self.model_name == "esm3":
 
-            # Use the ESM3 model to generate structure
-            self.logger.debug("creating protein")
-            protein = ESMProtein(sequence=task.seq)
-            protein = self.model.generate(
-                protein,
-                GenerationConfig(track="structure", num_steps=self.esm_num_steps),
-            )
-            self.logger.debug("writing protein to pdb")
-            protein.to_pdb(temp_pdb_path)
-            del protein
+        #     # Use the ESM3 model to generate structure
+        #     self.logger.debug("creating protein")
+        #     protein = ESMProtein(sequence=task.seq)
+        #     protein = self.model.generate(
+        #         protein,
+        #         GenerationConfig(track="structure", num_steps=self.esm_num_steps),
+        #     )
+        #     self.logger.debug("writing protein to pdb")
+        #     protein.to_pdb(temp_pdb_path)
+        #     del protein
 
         # ########################################
         #           ESMFold Meta API
         # ########################################
 
-        elif self.model_name == "esmfold":
+        if self.model_name == "esmfold":
             # Use the ESMFold API to generate structure
             self.logger.debug("sending request")
 
