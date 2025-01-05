@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -49,7 +49,7 @@ logger.addHandler(console_handler)
 
 class PredictRequest(BaseModel):
     seq: str
-    name: str | None
+    name: Optional[str] = None
     type: str
 
 
