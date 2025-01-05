@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -10,6 +11,7 @@ from tempfile import TemporaryDirectory
 from threading import Semaphore
 from typing import Any, Optional
 
+import numpy as np
 import requests
 import torch
 from biotite.structure.io import pdb, pdbx
@@ -267,15 +269,24 @@ class ProtModel:
                 f"[{task.id}] converting input to Protenix specific json input"
             )
             # Convert task.seq to the required JSON format
-            infer_json = convert_seq_to_json(task)
+            infer_json = os.path.join(self.input_json_temp_dir, f"input_{task.id}.json")
+            # save json to temp_dir
+            with open(infer_json, "w") as f:
+                json.dump(convert_seq_to_json(task), f)
+
             infer_json = msa_search_update(infer_json, self.input_json_temp_dir)
 
+            self.logger.debug(
+                f"[{task.id}] MSA search done, {json.dumps(infer_json,indent=2)}"
+            )
             configs = self.model.configs
             configs["input_json_path"] = infer_json
             if not contain_msa_res(infer_json):
                 raise RuntimeError(
                     f"`{infer_json}` has no msa result for `proteinChain`, please add first."
                 )
+
+            self.logger.debug(f"[{task.id}] running inference")
             infer_predict(self.model, configs)
 
             # result dump to pdb
@@ -371,7 +382,7 @@ def get_default_runner(
     return SingleGPUInferenceRunner(configs)
 
 
-def convert_seq_to_json(task):
+def convert_seq_to_json(task: PredictTask) -> dict:
     """
     Convert task.seq to the specified JSON format.
 
@@ -416,18 +427,36 @@ def convert_outputs_to_pdb(outputs):
     return pdbs
 
 
-def cif_to_pdb(cif_file_path: str, pdb_file_path: str) -> None:
+def cif_to_pdb(cif_file_path: str, pdb_file_path: str):
     """
-    Convert a CIF file to a PDB file, handling multi-character chain IDs.
+    Convert a CIF file to a PDB file, preserving B-factor information.
 
     Args:
         cif_file_path (str): Path to the input CIF file.
         pdb_file_path (str): Path to the output PDB file.
+        scale_b_factors (bool): Whether to scale B-factors by 1/100 (default: True).
     """
-    # Read the CIF file into an AtomArray
+    # Read the CIF file
     cif_file = pdbx.CIFFile.read(cif_file_path)
     atom_array = pdbx.get_structure(cif_file, model=1)
 
+    # ============ Migrate B-factor ============
+    # Extract B-factor information from the CIF file
+    atom_site = cif_file.block["atom_site"]
+    if "B_iso_or_equiv" in atom_site:
+        # Convert B-factors to a numpy array of float type
+        b_factors = np.array(atom_site["B_iso_or_equiv"].as_array(), dtype=float)
+    else:
+        # If B-factor information is missing, set it to 0
+        b_factors = np.zeros(atom_array.array_length(), dtype=float)
+
+    # Scale B-factors if necessary
+    b_factors = b_factors / 100.0  # Scale by 1/100
+
+    atom_array.add_annotation("b_factor", dtype=float)
+    atom_array.b_factor = b_factors  # Set B-factor information
+
+    # ============ Fix Chain ID ============
     # Create a mapping from multi-character chain IDs to single-character chain IDs
     unique_chain_ids = set(atom_array.chain_id)
     chain_id_mapping = {}
@@ -443,12 +472,8 @@ def cif_to_pdb(cif_file_path: str, pdb_file_path: str) -> None:
     new_chain_ids = [chain_id_mapping[chain_id] for chain_id in atom_array.chain_id]
     atom_array.chain_id = new_chain_ids
 
+    # ============ Save PDB ============
     # Write the AtomArray to a PDB file
     pdb_file = pdb.PDBFile()
     pdb_file.set_structure(atom_array)
     pdb_file.write(pdb_file_path)
-
-    # print(f"Conversion successful. PDB file saved to {pdb_file_path}")
-    # print("Chain ID mapping:")
-    for original, new in chain_id_mapping.items():
-        print(f"{original} -> {new}")
