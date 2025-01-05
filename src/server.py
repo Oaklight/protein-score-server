@@ -22,6 +22,7 @@ import yaml
 from huggingface_hub import login
 from TMscore import TMscore
 
+
 import to_pdb
 from cache import ProtCache
 from model import ProtModel
@@ -125,6 +126,12 @@ class PredictServer:
                             id=all_idx,
                             device=f"cuda:{cuda_idx}",
                         )
+                elif model_name in ["alphafold3", "protenix"]:
+                    model = ProtModel(
+                        model_name,
+                        id=all_idx,
+                        device="cuda:{cuda_idx}",
+                    )
                 else:
                     raise ValueError("Unsupported model name")
 

@@ -1,15 +1,36 @@
 import logging
 import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
 import time
+from tempfile import TemporaryDirectory
 from threading import Semaphore
+from typing import Any, Optional
 
 import requests
 import torch
+from biotite.structure.io import pdb, pdbx
+from configs.configs_base import configs as configs_base
+from configs.configs_data import data_configs
+from configs.configs_inference import inference_configs
 from esm.models.esm3 import ESM3
 from esm.sdk.api import ESMProtein, GenerationConfig
+from protenix.config import parse_configs
 
 # Import the ratelimit library
 from ratelimit import limits, sleep_and_retry
+
+# Import for protenix
+from runner.batch_inference import get_default_runner
+
+# Import for protenix
+from runner.inference import InferenceRunner, download_infercence_cache, infer_predict
+from runner.msa_search import contain_msa_res, msa_search_update
+
+# Import for Huggingface ESM
 from transformers import AutoTokenizer, EsmForProteinFolding
 from transformers.models.esm.openfold_utils.feats import atom14_to_atom37
 from transformers.models.esm.openfold_utils.protein import Protein as OFProtein
@@ -84,7 +105,7 @@ class ProtModel:
             self.gpu_model = True
             self.priority = 0
 
-            # Initialize Hugging Face ESMFold model
+            # Initialize HuggingFace ESMFold model
             self.tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
             self.model = EsmForProteinFolding.from_pretrained(
                 "facebook/esmfold_v1",
@@ -101,6 +122,39 @@ class ProtModel:
                 torch.backends.cudnn.allow_tf32 = True
             self.model.trunk.set_chunk_size(64)
             self.logger.debug("Hugging Face ESMFold model loaded")
+
+        # ########################################
+        #           Protenix InferenceRunner
+        # ########################################
+
+        elif self.model_name in ["alphafold3", "protenix"]:
+            self.gpu_model = True
+            self.priority = 0
+
+            # Initialize Protenix InferenceRunner
+            self.seeds = [kwargs.get("seeds", 101)]
+
+            # Set up temporary directories for input and output
+            self.temp_outdir = "./temp_protenix"
+            self.input_json_temp_dir = os.path.join(self.temp_outdir, "input_json")
+            self.output_temp_dir = os.path.join(self.temp_outdir, "output")
+            os.makedirs(self.input_json_temp_dir, exist_ok=True)
+            os.makedirs(self.output_temp_dir, exist_ok=True)
+
+            # Set the desired device for this model
+            self.device_id = kwargs.get("device", "cpu")  # Default to CPU
+            self.model = get_default_runner(
+                seeds=self.seeds,
+                device=self.device_id,  # cpu or cuda:{idx}
+                dump_dir=self.output_temp_dir,
+            )
+
+            self.logger.debug(
+                f"Protenix InferenceRunner loaded on {'CPU' if self.device_id == 'cpu' else f'GPU {self.device_id}'}"
+            )
+
+            self.logger.debug(f"AlphaFold3/Protenix InferenceRunner loaded")
+
         else:
             raise ValueError("Unsupported model name")
 
@@ -202,6 +256,41 @@ class ProtModel:
             with open(temp_pdb_path, "w") as pdb_file:
                 pdb_file.write("\n".join(pdb_content))
 
+        # ########################################
+        #           Protenix InferenceRunner
+        # ########################################
+
+        elif self.model_name in ["alphafold3", "protenix"]:
+
+            # Convert task.seq to the required JSON format
+            self.logger.debug(
+                f"[{task.id}] converting input to Protenix specific json input"
+            )
+            # Convert task.seq to the required JSON format
+            infer_json = convert_seq_to_json(task)
+            infer_json = msa_search_update(infer_json, self.input_json_temp_dir)
+
+            configs = self.model.configs
+            configs["input_json_path"] = infer_json
+            if not contain_msa_res(infer_json):
+                raise RuntimeError(
+                    f"`{infer_json}` has no msa result for `proteinChain`, please add first."
+                )
+            infer_predict(self.model, configs)
+
+            # result dump to pdb
+            protenix_cif_path = os.path.join(
+                self.output_temp_dir,
+                task.id,
+                f"seed_{configs['seeds'][0]}",
+                "predictions",
+                f"{task.id}_seed_{configs['seeds'][0]}_sample_0.cif",
+            )
+            protenix_pdb_path = temp_pdb_path
+
+            self.logger.debug(f"[{task.id}] writing pdb to temp file")
+            cif_to_pdb(protenix_cif_path, protenix_pdb_path)
+
         else:
             raise ValueError("Unsupported model name")
 
@@ -216,6 +305,88 @@ class ProtModel:
         with global_rate_limiter:
             response = requests.post(self.esmfold_api_url, data=seq)
         return response
+
+
+class SingleGPUInferenceRunner(InferenceRunner):
+    def __init__(self, configs: Any) -> None:
+        super().__init__(configs)  # Call the superclass's __init__ method
+        print(self.configs.dump_dir)
+
+    def init_env(
+        self,
+    ) -> None:
+
+        config_device = self.configs.get("device", "cpu")
+
+        self.use_cuda = torch.cuda.is_available() and not config_device == "cpu"
+        if self.use_cuda:
+            self.device = torch.device(config_device)
+            logging.info(f"Using CUDA_VISIBLE_DEVICES: [{self.device}]")
+            torch.cuda.set_device(self.device)
+        else:
+            self.device = torch.device("cpu")
+        if self.configs.use_deepspeed_evo_attention:
+            env = os.getenv("CUTLASS_PATH", None)
+            self.print(f"env: {env}")
+            assert (
+                env is not None
+            ), "if use ds4sci, set `CUTLASS_PATH` env as https://www.deepspeed.ai/tutorials/ds4sci_evoformerattention/"
+            if env is not None:
+                logging.info(
+                    "The kernels will be compiled when DS4Sci_EvoformerAttention is called for the first time."
+                )
+        use_fastlayernorm = os.getenv("LAYERNORM_TYPE", None)
+        if use_fastlayernorm == "fast_layernorm":
+            logging.info(
+                "The kernels will be compiled when fast_layernorm is called for the first time."
+            )
+
+        logging.info("Finished init ENV.")
+
+
+def get_default_runner(
+    seeds: Optional[list] = None,
+    device: str = "cuda:0",
+    dump_dir: str = None,
+) -> InferenceRunner:
+    configs_base["use_deepspeed_evo_attention"] = (
+        os.environ.get("USE_DEEPSPEED_EVO_ATTTENTION", False) == "true"
+    )
+    configs_base["model"]["N_cycle"] = 10
+    configs_base["sample_diffusion"]["N_sample"] = 1
+    configs_base["sample_diffusion"]["N_step"] = 200
+    configs_base["device"] = device
+
+    if dump_dir:
+        inference_configs["dump_dir"] = dump_dir
+
+    configs = {**configs_base, **{"data": data_configs}, **inference_configs}
+    configs = parse_configs(
+        configs=configs,
+        fill_required_with_null=True,
+    )
+    if seeds is not None:
+        configs.seeds = seeds
+    download_infercence_cache(configs, model_version="v0.2.0")
+    return SingleGPUInferenceRunner(configs)
+
+
+def convert_seq_to_json(task):
+    """
+    Convert task.seq to the specified JSON format.
+
+    Args:
+        task (PredictTask): The task containing the sequence and UUID.
+
+    Returns:
+        dict: The JSON structure as specified.
+    """
+    return [
+        {
+            "sequences": [{"proteinChain": {"sequence": task.seq, "count": 1}}],
+            "name": task.id,
+        }
+    ]
 
 
 def convert_outputs_to_pdb(outputs):
@@ -243,3 +414,41 @@ def convert_outputs_to_pdb(outputs):
         )
         pdbs.append(to_pdb(pred))
     return pdbs
+
+
+def cif_to_pdb(cif_file_path: str, pdb_file_path: str) -> None:
+    """
+    Convert a CIF file to a PDB file, handling multi-character chain IDs.
+
+    Args:
+        cif_file_path (str): Path to the input CIF file.
+        pdb_file_path (str): Path to the output PDB file.
+    """
+    # Read the CIF file into an AtomArray
+    cif_file = pdbx.CIFFile.read(cif_file_path)
+    atom_array = pdbx.get_structure(cif_file, model=1)
+
+    # Create a mapping from multi-character chain IDs to single-character chain IDs
+    unique_chain_ids = set(atom_array.chain_id)
+    chain_id_mapping = {}
+    single_char_chain_ids = (
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    )
+    for i, chain_id in enumerate(unique_chain_ids):
+        if i >= len(single_char_chain_ids):
+            raise ValueError("Too many chains to map to single-character chain IDs.")
+        chain_id_mapping[chain_id] = single_char_chain_ids[i]
+
+    # Apply the mapping to the chain IDs
+    new_chain_ids = [chain_id_mapping[chain_id] for chain_id in atom_array.chain_id]
+    atom_array.chain_id = new_chain_ids
+
+    # Write the AtomArray to a PDB file
+    pdb_file = pdb.PDBFile()
+    pdb_file.set_structure(atom_array)
+    pdb_file.write(pdb_file_path)
+
+    # print(f"Conversion successful. PDB file saved to {pdb_file_path}")
+    # print("Chain ID mapping:")
+    for original, new in chain_id_mapping.items():
+        print(f"{original} -> {new}")
