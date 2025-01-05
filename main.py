@@ -49,7 +49,7 @@ logger.addHandler(console_handler)
 
 class PredictRequest(BaseModel):
     seq: str
-    name: str
+    name: str | None
     type: str
 
 
