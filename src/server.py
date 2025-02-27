@@ -354,7 +354,7 @@ class PredictServer:
 
         # preprocess task, find seq for seq2 if only name provided
         if task.name:
-            temp_seq2 = to_pdb.get_sequence_by_name(self.name_seq_map, task.name)
+            temp_seq2 = to_pdb.get_sequence_by_name_from_pdbbank(task.name)
             if temp_seq2:
                 task.seq2 = temp_seq2
             else:

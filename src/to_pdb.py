@@ -12,6 +12,7 @@ from typing import Dict, List, Literal
 
 import numpy as np
 import pandas as pd
+import requests
 import yaml
 from tqdm import tqdm
 
@@ -50,6 +51,42 @@ def get_sequence_by_name(name_seq_map: Dict[str, str], name: str) -> str | None:
     str | None: The corresponding sequence if found, otherwise None.
     """
     return name_seq_map.get(name)
+
+
+def get_sequence_by_name_from_pdbbank(name: str) -> str | None:
+    """
+    Returns the sequence corresponding to the given name by querying pdb bank.
+
+    Args:
+        name (str): The name in the format 'protein_id.chain_id' (e.g., '1dgw.Y').
+
+    Returns:
+        str | None: The sequence corresponding to the given chain, or None if not found.
+    """
+    try:
+        # Split the name into protein ID and chain ID
+        protein_id, chain_id = name.split(".")
+
+        # Fetch the FASTA content from the RCSB PDB database
+        url = f"https://www.rcsb.org/fasta/entry/{protein_id}/display"
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
+        # Parse the FASTA content using Biopython
+        fasta_content = response.text
+        fasta_io = StringIO(fasta_content)
+        for record in SeqIO.parse(fasta_io, "fasta"):
+            # Extract the second segment (Chain segment) from the description
+            segments = record.description.split("|")
+            if len(segments) >= 2 and chain_id in segments[1]:
+                return str(record.seq)
+
+        # If the chain ID is not found, return None
+        return None
+
+    except Exception as e:
+        print(f"Error fetching sequence: {e}")
+        return None
 
 
 def get_name_by_sequence(name_seq_map: Dict[str, str], sequence: str) -> str | None:
