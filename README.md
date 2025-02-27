@@ -139,10 +139,12 @@ The server will return a JSON response containing two fields: `job_id` and `pred
 
 ### 4.3. Error Handling
 
-* **202**: Job is being processed. Please wait.
-* **400**: Task input information error. Check detailed messages.
-* **404**: Task ID does not exist in server records.
-* **429**: Server job queue is currently full. Please wait.
+When querying for results, use the following guidelines based on the status code:
+- **102 Processing**: The task is queued. Wait a few seconds before checking again.
+- **202 Accepted**: The task is being processed. Wait a few seconds before checking again.
+- **200 OK**: The task is complete. The result is available in the response.
+- **404 Not Found**: The task ID is invalid. Check the ID or resubmit the task.
+- **429 Too Many Requests**: The server is busy. Wait and try again later.
 
 ### 4.4. Retry Strategy
 
