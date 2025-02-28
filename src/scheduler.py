@@ -139,10 +139,6 @@ class TaskScheduler:
                         next_task_id = task_id
                         max_priority = current_priority
                         oldest_creation = current_created_at
-            cprint(
-                f"Potential Next task ID: {next_task_id} | Priority {max_priority}",
-                "cyan",
-            )
             # Second pass: Atomically assign task to this worker
             if next_task_id is not None:
                 if next_task_id != "shutdown":

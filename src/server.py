@@ -388,9 +388,6 @@ class PredictServer:
         while True:
             task_id = self.task_scheduler.get_next_task_with_max_priority()
             if task_id is None:
-                self.logger.warning(
-                    colorstring("No task available, waiting...", "yellow")
-                )
                 time.sleep(0.5)
                 continue
 
