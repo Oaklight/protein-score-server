@@ -417,6 +417,8 @@ class PredictServer:
         # shutdown the cache db
         self.cache_db.close()
 
+        self.task_scheduler.close()
+
         self.logger.info("Server stopped. Bye!")
 
     def get_status(self):

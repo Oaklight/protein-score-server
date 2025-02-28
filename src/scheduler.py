@@ -25,7 +25,10 @@ TASK_STATES = {
 class TaskScheduler:
 
     def __init__(self, db_path="task_scheduler.db"):
+        # always create a new db file regardless if it exist
         self.db_path = db_path
+        if os.path.exists(db_path):
+            os.remove(db_path)
         self.task_db = SqliteDict(db_path, tablename="tasks", autocommit=True)
         self.lock = FileLock(f"{db_path}.lock")
 
@@ -156,6 +159,10 @@ class TaskScheduler:
     def close(self) -> None:
         """Close the database connection."""
         self.task_db.close()
+
+        # clean up after each run
+        os.remove(self.db_path)
+        os.remove(f"{self.db_path}.lock")
 
 
 if __name__ == "__main__":
