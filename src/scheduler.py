@@ -1,10 +1,25 @@
-from sqlitedict import SqliteDict
-from typing import Optional, Dict, Any, Literal
-from datetime import datetime, timedelta
-from task import PredictTask  # Import the PredictTask class
-import threading
+import os
+import random
+import sys
+from datetime import datetime
+from typing import Any, Dict, Literal, Optional
 
-TASK_STATES = {"PENDING": 0, "PROCESSING": 1, "COMPLETED": 2, "FAILED": 3}
+from filelock import FileLock
+from sqlitedict import SqliteDict
+
+from task import PredictTask  # Import the PredictTask class
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+from utils import cprint
+
+TASK_STATES = {
+    "PENDING": 0,
+    "PROCESSING": 1,
+    "COMPLETED": 2,
+    "FAILED": 3,
+}
 
 
 class TaskScheduler:
@@ -12,7 +27,7 @@ class TaskScheduler:
     def __init__(self, db_path="task_scheduler.db"):
         self.db_path = db_path
         self.task_db = SqliteDict(db_path, tablename="tasks", autocommit=True)
-        self.lock = threading.Lock()
+        self.lock = FileLock(f"{db_path}.lock")
 
     def add_task(self, task: PredictTask) -> None:
         """Add a new task to the scheduler."""
@@ -24,6 +39,7 @@ class TaskScheduler:
                 "created_at": datetime.now().isoformat(),
                 "scheduled_at": datetime.now().isoformat(),
                 "result": None,
+                "worker_id": None,
             }
             self.task_db[task.id] = task_data
 
@@ -47,12 +63,18 @@ class TaskScheduler:
                 task_data["priority"] += 1
                 self.task_db[task_id] = task_data
 
-    def reschedule_task(self, task_id: str, new_time: datetime) -> None:
+    def reschedule_task(
+        self, task_id: str, new_time: datetime, need_expedite=False
+    ) -> None:
         """Reschedule a task to a new time."""
         with self.lock:
             if task_id in self.task_db:
                 task_data = self.task_db[task_id]
+                task_data["status"] = TASK_STATES["PENDING"]
+                task_data["worker_id"] = None
                 task_data["scheduled_at"] = new_time.isoformat()
+                if need_expedite:
+                    task_data["priority"] += 1
                 self.task_db[task_id] = task_data
 
     def get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -75,6 +97,7 @@ class TaskScheduler:
         """
         Retrieve the ID of the next task with the highest priority number that is in the PENDING state.
         Uses creation time as a tie-breaker (older tasks have higher priority).
+        Atomically marks the task as IN_PROGRESS to prevent other workers from taking it.
 
         Returns:
             Optional[str]: The ID of the next task with the highest priority,
@@ -85,6 +108,7 @@ class TaskScheduler:
             max_priority = -1
             oldest_creation = None
 
+            # First pass: Find the highest priority task
             for task_id, task_data in self.task_db.items():
                 if task_data["status"] == TASK_STATES["PENDING"]:
                     current_priority = task_data["priority"]
@@ -98,83 +122,216 @@ class TaskScheduler:
                         max_priority = current_priority
                         oldest_creation = current_created_at
 
+            # Second pass: Atomically assign task to this worker
+            if next_task_id is not None:
+                task_data = self.task_db[next_task_id]
+                if (
+                    task_data["status"] == TASK_STATES["PENDING"]
+                    and task_data["worker_id"] is None
+                ):
+                    task_data["status"] = TASK_STATES["PROCESSING"]
+                    task_data["worker_id"] = (
+                        os.getpid()
+                    )  # Use process ID for both multiprocess and multithread
+                    self.task_db[next_task_id] = task_data
+                else:
+                    # Task was taken by another worker, try again
+                    next_task_id = None
+
             return next_task_id
 
     def close(self) -> None:
         """Close the database connection."""
         self.task_db.close()
 
-
 if __name__ == "__main__":
-    import multiprocessing
-    import threading
-    import time
+    import argparse
     import random
+    import signal
+    import time
+    import threading
+    import multiprocessing
 
-    def worker_process(scheduler, worker_id):
-        """Worker process that processes tasks"""
-        while True:
-            task_id = scheduler.get_next_task_with_max_priority()
-            if task_id is None:
-                break
-            
-            # Process the task
-            scheduler.change_task_status(task_id, "PROCESSING")
-            print(f"Worker {worker_id} processing task {task_id}")
-            time.sleep(random.uniform(0.5, 1.5))  # Simulate task processing
-            scheduler.change_task_status(task_id, "COMPLETED")
-            print(f"Worker {worker_id} completed task {task_id}")
+    argparser = argparse.ArgumentParser(description="Task Scheduler Example")
+    argparser.add_argument(
+        "-m",
+        "--mode",
+        default="multithread",
+        help="test which case, multithread or multiprocess",
+    )
+    args = argparser.parse_args()
 
-    def worker_thread(scheduler, worker_id):
-        """Worker thread that processes tasks"""
-        while True:
-            task_id = scheduler.get_next_task_with_max_priority()
-            if task_id is None:
-                break
-            
-            # Process the task
-            scheduler.change_task_status(task_id, "PROCESSING")
-            print(f"Thread {worker_id} processing task {task_id}")
-            time.sleep(random.uniform(0.5, 1.5))  # Simulate task processing
-            scheduler.change_task_status(task_id, "COMPLETED")
-            print(f"Thread {worker_id} completed task {task_id}")
+    def worker_process(worker_id, db_path, stop_event):
+        """Worker process that processes tasks with timeout and failure handling"""
+        scheduler = TaskScheduler(db_path)
+        try:
+            while not stop_event.is_set():
+                task_id = scheduler.get_next_task_with_max_priority()
+                if task_id is None:
+                    time.sleep(0.5)  # Short delay before checking again
+                    continue
 
-    # Create scheduler instance
-    scheduler = TaskScheduler()
+                # Process the task (task is already assigned to this worker)
+                task_data = scheduler.task_db[task_id]
+                cprint(
+                    f"Worker {worker_id} processing task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
+                    "cyan",
+                )
 
-    # Add sample tasks
-    for i in range(10):
-        task = PredictTask(seq=f"SEQ{i}", task_type="plddt", priority=random.randint(1, 5))
-        scheduler.add_task(task)
-        print(f"Added task {task.id} with priority {task.priority}")
+                try:
+                    # Simulate task processing with potential timeout/failure
+                    process_time = random.uniform(0.5, 2.5)
+                    if process_time > 2.0:  # Simulate timeout
+                        raise TimeoutError(
+                            f"Task {task_id} timed out after {process_time:.2f}s"
+                        )
+                    if random.random() < 0.2:  # 20% chance of failure
+                        raise RuntimeError(f"Task {task_id} failed randomly")
 
-    # Multiprocess example
-    print("\nRunning multiprocess example:")
-    processes = []
-    for i in range(3):  # Create 3 worker processes
-        p = multiprocessing.Process(target=worker_process, args=(scheduler, i))
-        processes.append(p)
-        p.start()
+                    time.sleep(process_time)
+                    scheduler.change_task_status(task_id, "COMPLETED")
+                    cprint(
+                        f"Worker {worker_id} completed task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
+                        "magenta",
+                    )
 
-    for p in processes:
-        p.join()
+                except (TimeoutError, RuntimeError) as e:
+                    cprint(f"Worker {worker_id} encountered error: {str(e)}", "red")
+                    scheduler.change_task_status(task_id, "FAILED")
 
-    # Add more tasks for thread example
-    for i in range(10, 20):
-        task = PredictTask(seq=f"SEQ{i}", task_type="pdb", priority=random.randint(1, 5))
-        scheduler.add_task(task)
-        print(f"Added task {task.id} with priority {task.priority}")
+                    # Reschedule the task with increased priority
+                    new_time = datetime.now()
+                    scheduler.reschedule_task(task_id, new_time, need_expedite=True)
+                    cprint(
+                        f"Rescheduled task {task_id} with new priority {task_data["priority"] + 1} at {new_time}",
+                        "yellow",
+                    )
 
-    # Multithread example
-    print("\nRunning multithread example:")
-    threads = []
-    for i in range(3):  # Create 3 worker threads
-        t = threading.Thread(target=worker_thread, args=(scheduler, i))
-        threads.append(t)
-        t.start()
+        finally:
+            cprint(f"Worker {worker_id} is shutting down", "yellow")
+            scheduler.close()
 
-    for t in threads:
-        t.join()
+    def worker_thread(scheduler, worker_id, stop_event):
+        """Worker thread that processes tasks with timeout and failure handling"""
+        try:
+            while not stop_event.is_set():
+                try:
+                    task_id = scheduler.get_next_task_with_max_priority()
+                    if task_id is None:
+                        time.sleep(0.5)  # Short delay before checking again
+                        continue
 
-    # Close the scheduler
-    scheduler.close()
+                    # Process the task (task is already assigned to this worker)
+                    task_data = scheduler.task_db[task_id]
+                    cprint(
+                        f"Thread {worker_id} processing task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
+                        "cyan",
+                    )
+
+                    try:
+                        # Simulate task processing with potential timeout/failure
+                        process_time = random.uniform(0.5, 2.5)
+                        if process_time > 2.0:  # Simulate timeout
+                            raise TimeoutError(
+                                f"Task {task_id} timed out after {process_time:.2f}s"
+                            )
+                        if random.random() < 0.2:  # 20% chance of failure
+                            raise RuntimeError(f"Task {task_id} failed randomly")
+
+                        time.sleep(process_time)
+                        scheduler.change_task_status(task_id, "COMPLETED")
+                        cprint(
+                            f"Thread {worker_id} completed task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
+                            "magenta",
+                        )
+
+                    except (TimeoutError, RuntimeError) as e:
+                        cprint(f"Thread {worker_id} encountered error: {str(e)}", "red")
+                        scheduler.change_task_status(task_id, "FAILED")
+
+                        # Reschedule the task with increased priority
+                        new_time = datetime.now()
+                        scheduler.reschedule_task(task_id, new_time, need_expedite=True)
+                        cprint(
+                            f"Rescheduled task {task_id} with new priority {task_data['priority'] + 1} at {new_time}",
+                            "yellow",
+                        )
+                except Exception as e:
+                    time.sleep(1)  # Prevent tight error loop
+        finally:
+            cprint(f"Thread {worker_id} is shutting down", "yellow")
+
+    stop_event_mp = multiprocessing.Event()  # STOP flag for multiprocess
+    stop_event_th = threading.Event()  # STOP flag for multithread
+
+    # Signal handler to set the STOP flag on Ctrl+C
+    def signal_handler(signum, frame):
+        cprint("\nCtrl+C detected. Stopping workers...", "red")
+        stop_event_mp.set()
+        stop_event_th.set()
+
+    # Register the signal handler for SIGINT (Ctrl+C)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    if args.mode == "multiprocess":
+        # Multiprocess example
+        cprint("\nRunning multiprocess example:", "white")
+        db_path = "task_scheduler_mp.db"
+        scheduler = TaskScheduler(db_path)
+
+        try:
+            # Add initial tasks
+            cprint("Adding tasks for multiprocess example:", "white")
+            for i in range(10):
+                task = PredictTask(
+                    seq=f"SEQ{i}", task_type="plddt", priority=random.randint(1, 5)
+                )
+                scheduler.add_task(task)
+                cprint(f"Added task {task.id} with priority {task.priority}", "yellow")
+
+            # Create worker processes
+            processes = []
+            for i in range(3):  # Create 3 worker processes
+                p = multiprocessing.Process(
+                    target=worker_process, args=(i, db_path, stop_event_mp)
+                )
+                processes.append(p)
+                p.start()
+
+            # Wait for processes to complete
+            for p in processes:
+                p.join()
+        finally:
+            cprint(f"Main worker is shutting down", "yellow")
+            scheduler.close()
+
+    elif args.mode == "multithread":
+        # Multithread example
+        cprint("\nRunning multithread example:", "white")
+        db_path = "task_scheduler_th.db"
+        scheduler = TaskScheduler(db_path)
+
+        try:
+            # Add tasks
+            cprint("Adding tasks for multithread example:", "white")
+            for i in range(10, 20):
+                task = PredictTask(
+                    seq=f"SEQ{i}", task_type="pdb", priority=random.randint(1, 5)
+                )
+                scheduler.add_task(task)
+                cprint(f"Added task {task.id} with priority {task.priority}", "yellow")
+
+            # Create worker threads
+            threads = []
+            for i in range(3):  # Create 3 worker threads
+                t = threading.Thread(
+                    target=worker_thread, args=(scheduler, i, stop_event_th)
+                )
+                threads.append(t)
+                t.start()
+
+            # Wait for threads to complete
+            for t in threads:
+                t.join()
+        finally:
+            scheduler.close()
