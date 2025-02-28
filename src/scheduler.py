@@ -37,7 +37,9 @@ class TaskScheduler:
                     task.to_dict() if task is not None else None
                 ),  # Store the PredictTask as a dictionary
                 "status": TASK_STATES["PENDING"],
-                "priority": task.priority,
+                "priority": (
+                    task.priority if task is not None else sys.maxsize
+                ),  # max priority if None, meaning to stop server
                 "created_at": datetime.now().isoformat(),
                 "scheduled_at": datetime.now().isoformat(),
                 "result": None,
