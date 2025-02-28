@@ -11,15 +11,18 @@ logging.basicConfig(
 
 
 class PredictTask:
+
     def __init__(
         self,
-        seq,
-        name=None,
+        seq: str,
+        name: str = None,
         task_type: Literal["pdb", "plddt", "tmscore", "sc-tmscore"] = "plddt",
-        seq2=None,
-        priority=0,
+        seq2: str = None,
+        priority: int = 0,
+        id: str = None,
+        require_gpu: bool = None,
     ):
-        self.id = uuid4().hex
+        self.id = uuid4().hex if id is None else id
         self.seq = seq
         self.name = name  # name of reference sequence
         self.seq2 = seq2  # seq of reference sequence
@@ -30,8 +33,7 @@ class PredictTask:
             ).encode("utf-8")
         ).hexdigest()
         self.priority = priority  # smaller number, higher priority
-        self.create_time = time.time()
-        self.require_gpu = False
+        self.require_gpu = False if require_gpu is None else require_gpu
 
     def to_dict(self):
         return {
@@ -41,7 +43,21 @@ class PredictTask:
             "seq2": self.seq2,
             "type": self.type,
             "hash": self.hash,
+            "priority": self.priority,
+            "require_gpu": self.require_gpu,
         }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            seq=data["seq"],
+            name=data["name"],
+            task_type=data["type"],
+            seq2=data["seq2"],
+            priority=data["priority"],
+            id=data["id"],
+            require_gpu=data["require_gpu"],
+        )
 
     def __str__(self):
         return json.dumps(self.to_dict(), indent=4)
