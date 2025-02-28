@@ -144,6 +144,7 @@ class TaskScheduler:
         """Close the database connection."""
         self.task_db.close()
 
+
 if __name__ == "__main__":
     import argparse
     import random
@@ -176,6 +177,7 @@ if __name__ == "__main__":
                 cprint(
                     f"Worker {worker_id} processing task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
                     "cyan",
+                    flush=True,
                 )
 
                 try:
@@ -193,10 +195,15 @@ if __name__ == "__main__":
                     cprint(
                         f"Worker {worker_id} completed task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
                         "magenta",
+                        flush=True,
                     )
 
                 except (TimeoutError, RuntimeError) as e:
-                    cprint(f"Worker {worker_id} encountered error: {str(e)}", "red")
+                    cprint(
+                        f"Worker {worker_id} encountered error: {str(e)}",
+                        "red",
+                        flush=True,
+                    )
                     scheduler.change_task_status(task_id, "FAILED")
 
                     # Reschedule the task with increased priority
@@ -205,10 +212,11 @@ if __name__ == "__main__":
                     cprint(
                         f"Rescheduled task {task_id} with new priority {task_data["priority"] + 1} at {new_time}",
                         "yellow",
+                        flush=True,
                     )
 
         finally:
-            cprint(f"Worker {worker_id} is shutting down", "yellow")
+            cprint(f"Worker {worker_id} is shutting down", "yellow", flush=True)
             scheduler.close()
 
     def worker_thread(scheduler, worker_id, stop_event):
@@ -226,6 +234,7 @@ if __name__ == "__main__":
                     cprint(
                         f"Thread {worker_id} processing task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
                         "cyan",
+                        flush=True,
                     )
 
                     try:
@@ -243,10 +252,15 @@ if __name__ == "__main__":
                         cprint(
                             f"Thread {worker_id} completed task {task_id} with priority {task_data['priority']} created at {task_data['created_at']}",
                             "magenta",
+                            flush=True,
                         )
 
                     except (TimeoutError, RuntimeError) as e:
-                        cprint(f"Thread {worker_id} encountered error: {str(e)}", "red")
+                        cprint(
+                            f"Thread {worker_id} encountered error: {str(e)}",
+                            "red",
+                            flush=True,
+                        )
                         scheduler.change_task_status(task_id, "FAILED")
 
                         # Reschedule the task with increased priority
@@ -255,12 +269,18 @@ if __name__ == "__main__":
                         cprint(
                             f"Rescheduled task {task_id} with new priority {task_data['priority'] + 1} at {new_time}",
                             "yellow",
+                            flush=True,
                         )
                 except Exception as e:
                     time.sleep(1)  # Prevent tight error loop
         finally:
-            cprint(f"Thread {worker_id} is shutting down", "yellow")
+            cprint(
+                f"[{datetime.now()}] Thread {worker_id} is shutting down",
+                "yellow",
+                flush=True,
+            )
 
+    #  ================= STOP mechanism =================
     stop_event_mp = multiprocessing.Event()  # STOP flag for multiprocess
     stop_event_th = threading.Event()  # STOP flag for multithread
 
@@ -273,6 +293,7 @@ if __name__ == "__main__":
     # Register the signal handler for SIGINT (Ctrl+C)
     signal.signal(signal.SIGINT, signal_handler)
 
+    # ================= MULTIPROCESS =================
     if args.mode == "multiprocess":
         # Multiprocess example
         cprint("\nRunning multiprocess example:", "white")
@@ -305,6 +326,7 @@ if __name__ == "__main__":
             cprint(f"Main worker is shutting down", "yellow")
             scheduler.close()
 
+    # ================= MULTITHREAD =================
     elif args.mode == "multithread":
         # Multithread example
         cprint("\nRunning multithread example:", "white")
