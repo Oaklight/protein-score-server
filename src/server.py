@@ -1,5 +1,8 @@
 import os
 import sys
+from turtle import color
+
+from utils import colorstring
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -385,11 +388,15 @@ class PredictServer:
         while True:
             task_id = self.task_scheduler.get_next_task_with_max_priority()
             if task_id is None:
+                self.logger.warning(
+                    colorstring("No task available, waiting...", "yellow")
+                )
                 time.sleep(0.5)
                 continue
 
+            self.logger.info(colorstring(f"[{task_id}] Task picked up", "magenta"))
             if task_id is "shutdown":
-                self.logger.info("processing thread received None, exiting...")
+                self.logger.warning("processing thread received `shutdown`, exiting...")
                 break
             task = self.task_scheduler.get_task(task_id)
 
