@@ -440,13 +440,6 @@ class PredictServer:
                 if t["status"] == TASK_STATES["PENDING"]
             ]
         )
-        processing_tasks = len(
-            [
-                t
-                for t in self.task_scheduler.task_db.values()
-                if t["status"] == TASK_STATES["PROCESSING"]
-            ]
-        )
         completed_tasks = len(
             [
                 t
@@ -454,6 +447,11 @@ class PredictServer:
                 if t["status"] == TASK_STATES["COMPLETED"]
             ]
         )
+        processing_tasks = [
+            t
+            for t in self.task_scheduler.task_db.values()
+            if t["status"] == TASK_STATES["PROCESSING"]
+        ]
 
         self.logger.info(json.dumps(model_status, indent=4))
 
