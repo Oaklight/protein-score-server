@@ -131,19 +131,22 @@ class TaskScheduler:
 
             # Second pass: Atomically assign task to this worker
             if next_task_id is not None:
-                task_data = self.task_db[next_task_id]
-                if (
-                    task_data["status"] == TASK_STATES["PENDING"]
-                    and task_data["worker_id"] is None
-                ):
-                    task_data["status"] = TASK_STATES["PROCESSING"]
-                    task_data["worker_id"] = (
-                        os.getpid()
-                    )  # Use process ID for both multiprocess and multithread
-                    self.task_db[next_task_id] = task_data
+                if next_task_id != "shutdown":
+                    task_data = self.task_db[next_task_id]
+                    if (
+                        task_data["status"] == TASK_STATES["PENDING"]
+                        and task_data["worker_id"] is None
+                    ):
+                        task_data["status"] = TASK_STATES["PROCESSING"]
+                        task_data["worker_id"] = (
+                            os.getpid()
+                        )  # Use process ID for both multiprocess and multithread
+                        self.task_db[next_task_id] = task_data
+                    else:
+                        # Task was taken by another worker, try again
+                        next_task_id = None
                 else:
-                    # Task was taken by another worker, try again
-                    next_task_id = None
+                    return "shutdown"
 
             return next_task_id
 
