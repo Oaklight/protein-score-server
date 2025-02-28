@@ -45,7 +45,10 @@ class TaskScheduler:
                 "result": None,
                 "worker_id": None,
             }
-            self.task_db[task.id] = task_data
+            if task is not None:
+                self.task_db[task.id] = task_data
+            else:  # shutting down special case
+                self.task_db["shutdown"] = task_data
 
     def change_task_status(
         self,
