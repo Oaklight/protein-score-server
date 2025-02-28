@@ -317,7 +317,9 @@ class PredictServer:
                 temp_pdb_path2 = self._predict_structure(task, model, for_seq2=True)
             temp_pdb_path = self._predict_structure(task, model)
         except Exception as e:
-            self.logger.error(f"[{task.id}] Task failed: {e}")
+            self.logger.error(
+                colorstring(f"[{task.id}][_predict_structure] Task failed: {e}", "red")
+            )
             # raise custom error: structure_failure, you need to define it
         if temp_pdb_path is None:
             raise Exception("structure_failure")
@@ -327,7 +329,9 @@ class PredictServer:
         try:
             output_data = self._downstream_task(task, temp_pdb_path, temp_pdb_path2)
         except Exception as e:
-            self.logger.error(f"[{task.id}] Task failed: {e}")
+            self.logger.error(
+                colorstring(f"[{task.id}][_downstream_task] Task failed: {e}", "red")
+            )
         if output_data is None:
             raise Exception("score_failure")
 
@@ -373,7 +377,9 @@ class PredictServer:
             self.task_scheduler.change_task_status(task.id, "COMPLETED")
 
         except Exception as e:
-            self.logger.error(f"[{task.id}] Task failed: {e}")
+            self.logger.error(
+                colorstring(f"[{task.id}][predict] Task failed: {e}", "red")
+            )
             # Update task status and reschedule
             self.task_scheduler.change_task_status(task.id, "FAILED")
             self.task_scheduler.reschedule_task(
