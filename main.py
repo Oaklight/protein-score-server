@@ -118,26 +118,30 @@ async def predict(request: PredictRequest):
 
 @app.get("/result/{job_id}", response_model=ResultResponse)
 async def get_result(job_id: str):
-    # Check if the task is in the result pool
+    logger.info(f"Checking status for job_id: {job_id}")
+
+    # First check if the task is in the job queue
+    for _, _, task in predict_server.task_queue.queue:
+        if task.id == job_id:
+            logger.info(f"Job {job_id} found in task_queue")
+            raise HTTPException(
+                status_code=102, detail="Task is queued, waiting to be processed."
+            )
+
+    # Then check if the task is in the working pool
+    if job_id in predict_server.working_pool:
+        logger.info(f"Job {job_id} found in working_pool")
+        raise HTTPException(status_code=202, detail="Task is being processed.")
+
+    # Finally check if the task is in the result pool
     if job_id in predict_server.result_pool:
+        logger.info(f"Job {job_id} found in result_pool")
         result = predict_server.result_pool[job_id]
         return ResultResponse(job_id=job_id, prediction=result)
 
-    # Check if the task is in the working pool
-    elif job_id in predict_server.working_pool:
-        raise HTTPException(status_code=202, detail="Task is being processed.")
-
-    # Check if the task is in the job queue
-    else:
-        # Iterate through the task queue to see if the job_id is present
-        for _, _, task in predict_server.task_queue.queue:
-            if task.id == job_id:
-                raise HTTPException(
-                    status_code=102, detail="Task is queued, waiting to be processed."
-                )
-
-        # If the task is not found in the queue, raise a 404 error
-        raise HTTPException(status_code=404, detail="Task not found")
+    # If not found anywhere, return 404
+    logger.warning(f"Job {job_id} not found in any pool")
+    raise HTTPException(status_code=404, detail="Task not found")
 
 
 # when app is interrupted, stop the predict server
