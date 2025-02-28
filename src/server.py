@@ -395,7 +395,7 @@ class PredictServer:
                 continue
 
             self.logger.info(colorstring(f"[{task_id}] Task picked up", "magenta"))
-            if task_id is "shutdown":
+            if task_id == "shutdown":
                 self.logger.warning("processing thread received `shutdown`, exiting...")
                 break
             task = self.task_scheduler.get_task(task_id)
