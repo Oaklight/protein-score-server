@@ -388,10 +388,10 @@ class PredictServer:
                 time.sleep(0.5)
                 continue
 
-            task = self.task_scheduler.get_task(task_id)
-            if task is None:
+            if task_id is "shutdown":
                 self.logger.info("processing thread received None, exiting...")
                 break
+            task = self.task_scheduler.get_task(task_id)
 
             self.model_executor.submit(self.predict, task)
             self.logger.info(f"[{task.id}] Task submitted to pool executor")
