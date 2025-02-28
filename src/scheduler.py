@@ -95,6 +95,14 @@ class TaskScheduler:
                 return task_data["result"]
             return None
 
+    def set_task_result(self, task_id: str, result: Any) -> None:
+        """Set the result of a task."""
+        with self.lock:
+            if task_id in self.task_db:
+                task_data = self.task_db[task_id]
+                task_data["result"] = result
+                self.task_db[task_id] = task_data
+
     def get_task(self, task_id: str) -> Optional[PredictTask]:
         """Retrieve the PredictTask object for a given task ID."""
         with self.lock:

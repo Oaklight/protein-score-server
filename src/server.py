@@ -369,7 +369,7 @@ class PredictServer:
             self.cache_db.set(task.hash, output_data, table="task_cache")
 
             # Update task status. If this fail (unlikely), exception could still be handled. It ensures atomicity and "happy path first" principle.
-            self.task_scheduler.task_db[task.id]["result"] = output_data
+            self.task_scheduler.set_task_result(task.id, output_data)
             self.task_scheduler.change_task_status(task.id, "COMPLETED")
 
         except Exception as e:
