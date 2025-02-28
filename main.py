@@ -91,8 +91,6 @@ async def get_status():
 
 @app.post("/predict/", response_model=PredictResponse)
 async def predict(request: PredictRequest):
-    if predict_server.task_queue.full():
-        raise HTTPException(status_code=429, detail="Job queue is full")
 
     task = PredictTask(
         seq=request.seq,
