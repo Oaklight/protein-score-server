@@ -2,6 +2,7 @@ sqlitedict==2.1.0
 fastapi==0.112.2
 torch==2.3.1
 uvicorn==0.30.6
+gunicorn==23.0.0
 pyyaml==6.0.2
 pyarrow==17.0.0
 git+https://github.com/veghen/TMscore4Python.git
@@ -9,5 +10,3 @@ transformers==4.46.3
 accelerate>=0.26.0
 ratelimit==2.2.1
 protenix==0.3.6
-# esm==3.0.4
-# biotite==0.41.2

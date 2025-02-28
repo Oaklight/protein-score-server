@@ -11,9 +11,9 @@ To install the environment, follow these steps:
 ```bash
 git clone https://github.com/Oaklight/protein-score-server.git
 cd protein-score-server
-conda env create -f env/environment.yaml
+conda env create -f environment.yaml
 conda activate esm
-pip install -r env/requirements.txt
+pip install -r requirements.txt
 ```
 
 ## 3. Server Configuration
