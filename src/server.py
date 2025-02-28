@@ -1,19 +1,15 @@
-import heapq
 import os
-import random
 import sys
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-
-import gc
+import heapq
 import json
-import os
-import queue
-import sys
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from threading import Lock
 
 import biotite.structure.io as bsio
@@ -22,10 +18,10 @@ import yaml
 from huggingface_hub import login
 from TMscore import TMscore
 
-
 import to_pdb
 from cache import ProtCache
 from model import ProtModel
+from scheduler import TASK_STATES, TaskScheduler
 from task import PredictTask
 
 torch.set_warn_always(False)
@@ -47,15 +43,8 @@ class PredictServer:
         login(self.config["api_key"])
         self.load_models()
 
-        # initialize task queue, result pool, and result queue
-        # self.task_queue = queue.Queue(self.config["task_queue_size"])
-        self.task_queue = queue.PriorityQueue(self.config["task_queue_size"])
-
-        self.working_pool = {}
-        self.result_pool = {}
-
-        self.lock_workingpool = Lock()
-        self.lock_resultpool = Lock()
+        # initialize task scheduler
+        self.task_scheduler = TaskScheduler()
         self.prepare_cache(load_history=True)
 
         # initialize thread main executor and process pool executor
@@ -345,12 +334,11 @@ class PredictServer:
         model = self.get_avail_model(task.require_gpu)
         if model is None:
             self.logger.warning(f"[{task.id}] No model available!")
-            self.task_queue.put((task.priority, task.create_time, task))
+            self.task_scheduler.reschedule_task(task.id, datetime.now())
+            return
 
-        with self.lock_workingpool:
-            self.working_pool[task.id] = "WIP"
-        self.logger.debug(f"[{task.id}] working_pool lock | add to working pool")
-        self.logger.info(self.working_pool)
+        # Add task to scheduler
+        self.task_scheduler.change_task_status(task.id, "PROCESSING")
 
         # preprocess task, find seq for seq2 if only name provided
         if task.name:
@@ -376,25 +364,18 @@ class PredictServer:
                 self.logger.debug(f"[{task.id}] {output_data}")
             # add result to cache
             self.cache_db.set(task.hash, output_data, table="task_cache")
+
+            # Update task status. If this fail (unlikely), exception could still be handled. It ensures atomicity and "happy path first" principle.
+            self.task_scheduler.task_db[task.id]["result"] = output_data
+            self.task_scheduler.change_task_status(task.id, "COMPLETED")
+
         except Exception as e:
             self.logger.error(f"[{task.id}] Task failed: {e}")
-
-            # re-enqueue task
-            task.require_gpu = True
-            task.priority -= 10
-            self.task_queue.put((task.priority, task.create_time, task))
-
-            # pop task from working pool
-            with self.lock_workingpool:  # remove task.id element from working pool
-                self.working_pool.pop(task.id, None)
-        else:
-            # put future into result pool
-            with self.lock_resultpool:
-                self.result_pool[task.id] = output_data
-            with self.lock_workingpool:
-                self.working_pool.pop(task.id, None)
-
-            self.logger.info(f"[{task.id}] Task done, result put into result pool")
+            # Update task status and reschedule
+            self.task_scheduler.change_task_status(task.id, "FAILED")
+            self.task_scheduler.reschedule_task(
+                task.id, datetime.now(), need_expedite=True
+            )
         finally:
             # put model back to available queue
             self.release_model(model)
@@ -402,12 +383,15 @@ class PredictServer:
     def run(self):
         self.logger.info("Server is running")
         while True:
-            priority, _, task = self.task_queue.get()
+            task_id = self.task_scheduler.get_next_task_with_max_priority()
+            if task_id is None:
+                time.sleep(0.5)
+                continue
+
+            task = self.task_scheduler.get_task(task_id)
             if task is None:
                 self.logger.info("processing thread received None, exiting...")
                 break
-            # in case it got inserted again, bump up priority
-            task.priority = priority - 1
 
             self.model_executor.submit(self.predict, task)
             self.logger.info(f"[{task.id}] Task submitted to pool executor")
@@ -418,8 +402,7 @@ class PredictServer:
         count_down = 30  # 30 seconds before force stop
 
         # signal the job queue thread to exit
-        # self.task_queue.put((None)) # has highest priority
-        self.task_queue.put((-sys.maxsize, time.time(), None))
+        self.task_scheduler.add_task(None)
         # wait for the job queue thread to exit
         self.main_executor.join(timeout=count_down)
         # shutdown the executors
@@ -448,22 +431,38 @@ class PredictServer:
                 for each in self.model_status
                 if each.states["busy"]
             ]
-        with self.lock_resultpool:
-            processed_tasks = len(self.result_pool)
 
-        remaining_tasks = self.task_queue.qsize()
-
-        with self.lock_workingpool:
-            working_tasks = list(self.working_pool.copy())
+        # Get task status from scheduler
+        pending_tasks = len(
+            [
+                t
+                for t in self.task_scheduler.task_db.values()
+                if t["status"] == TASK_STATES["PENDING"]
+            ]
+        )
+        processing_tasks = len(
+            [
+                t
+                for t in self.task_scheduler.task_db.values()
+                if t["status"] == TASK_STATES["PROCESSING"]
+            ]
+        )
+        completed_tasks = len(
+            [
+                t
+                for t in self.task_scheduler.task_db.values()
+                if t["status"] == TASK_STATES["COMPLETED"]
+            ]
+        )
 
         self.logger.info(json.dumps(model_status, indent=4))
 
         return {
             "busy_models": busy_models,
             "busy_models_details": busy_models_details,
-            "processed_tasks": processed_tasks,
-            "remaining_tasks": remaining_tasks,
-            "working_tasks": working_tasks,
+            "processed_tasks": completed_tasks,
+            "remaining_tasks": pending_tasks,
+            "working_tasks": processing_tasks,
         }
 
 

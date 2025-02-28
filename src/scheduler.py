@@ -33,7 +33,9 @@ class TaskScheduler:
         """Add a new task to the scheduler."""
         with self.lock:
             task_data = {
-                "task": task.to_dict(),  # Store the PredictTask as a dictionary
+                "task": (
+                    task.to_dict() if task is not None else None
+                ),  # Store the PredictTask as a dictionary
                 "status": TASK_STATES["PENDING"],
                 "priority": task.priority,
                 "created_at": datetime.now().isoformat(),

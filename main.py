@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from src import to_pdb
 from src.server import PredictServer
 from src.task import PredictTask
+from src.scheduler import TASK_STATES
 
 config_path = os.path.join(current_dir, "server.yaml")
 with open(config_path, "r") as f:
@@ -102,7 +103,7 @@ async def predict(request: PredictRequest):
 
     validate_value = task.validate()
     if validate_value == 0:
-        predict_server.task_queue.put((task.priority, task.create_time, task))
+        predict_server.task_scheduler.add_task(task)
     else:
         error_messages = {
             1: "Sequence (seq) is required but missing",
@@ -120,23 +121,23 @@ async def predict(request: PredictRequest):
 async def get_result(job_id: str):
     logger.info(f"Checking status for job_id: {job_id}")
 
-    # First check if the task is in the job queue
-    for _, _, task in predict_server.task_queue.queue:
-        if task.id == job_id:
-            logger.info(f"Job {job_id} found in task_queue")
-            raise HTTPException(
-                status_code=102, detail="Task is queued, waiting to be processed."
-            )
+    # Check task status using scheduler
+    task_data = predict_server.task_scheduler.task_db.get(job_id)
+    if task_data is None:
+        logger.warning(f"Job {job_id} not found")
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    # Then check if the task is in the working pool
-    if job_id in predict_server.working_pool:
-        logger.info(f"Job {job_id} found in working_pool")
+    if task_data["status"] == TASK_STATES["PENDING"]:
+        logger.info(f"Job {job_id} is pending")
+        raise HTTPException(
+            status_code=202, detail="Task is queued, waiting to be processed."
+        )
+    elif task_data["status"] == TASK_STATES["PROCESSING"]:
+        logger.info(f"Job {job_id} is processing")
         raise HTTPException(status_code=202, detail="Task is being processed.")
-
-    # Finally check if the task is in the result pool
-    if job_id in predict_server.result_pool:
-        logger.info(f"Job {job_id} found in result_pool")
-        result = predict_server.result_pool[job_id]
+    elif task_data["status"] == TASK_STATES["COMPLETED"]:
+        logger.info(f"Job {job_id} is completed")
+        result = task_data["result"]
         return ResultResponse(job_id=job_id, prediction=result)
 
     # If not found anywhere, return 404
